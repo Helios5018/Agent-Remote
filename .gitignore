@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# 运行期数据（状态库 / hook 配置 / token）
+*.db
+*.db-shm
+*.db-wal
+.cmux-agent-remote/
+
+# 备份文件
+*.bak

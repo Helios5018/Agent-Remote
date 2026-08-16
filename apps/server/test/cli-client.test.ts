@@ -1,0 +1,154 @@
+import { describe, expect, it, vi } from "vitest";
+import { CmuxCliClient } from "../src/cmux/cli-client.ts";
+import { CmuxError } from "../src/cmux/client.ts";
+import { buildSendKeyArgs, buildSendTextArgs, assertSurfaceTarget } from "../src/cmux/control.ts";
+import type { CommandRunner } from "../src/cmux/exec.ts";
+import { RAW_READ_SCREEN, RAW_TOP, RAW_TREE } from "./fixtures.ts";
+
+function makeRunner(overrides: Partial<Record<string, string>> = {}) {
+  const calls: string[][] = [];
+  const runner: CommandRunner = async (args) => {
+    calls.push(args);
+    const command = args[0] ?? "";
+    if (overrides[command] !== undefined) {
+      return { stdout: overrides[command] as string, stderr: "", code: 0 };
+    }
+    switch (command) {
+      case "ping":
+        return { stdout: "PONG\n", stderr: "", code: 0 };
+      case "tree":
+        return { stdout: JSON.stringify(RAW_TREE), stderr: "", code: 0 };
+      case "top":
+        return { stdout: JSON.stringify(RAW_TOP), stderr: "", code: 0 };
+      case "read-screen":
+        return { stdout: JSON.stringify(RAW_READ_SCREEN), stderr: "", code: 0 };
+      default:
+        return { stdout: "", stderr: "", code: 0 };
+    }
+  };
+  return { runner, calls };
+}
+
+describe("CmuxCliClient", () => {
+  it("ping 能识别 PONG", async () => {
+    const { runner } = makeRunner();
+    expect(await new CmuxCliClient({ runner }).ping()).toBe(true);
+  });
+
+  it("getTree 合并 tree + top，并缓存结果避免打爆 CLI", async () => {
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner, treeTtlMs: 10_000 });
+
+    const tree = await client.getTree();
+    expect(tree.workspaces).toHaveLength(2);
+
+    await client.getTree();
+    // 两次 getTree 只应该真正执行一轮 tree + top
+    expect(calls.filter((c) => c[0] === "tree")).toHaveLength(1);
+    expect(calls.filter((c) => c[0] === "top")).toHaveLength(1);
+
+    client.invalidateTree();
+    await client.getTree();
+    expect(calls.filter((c) => c[0] === "tree")).toHaveLength(2);
+  });
+
+  it("并发 getTree 合并成一次执行（single-flight）", async () => {
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner, treeTtlMs: 0 });
+    await Promise.all([client.getTree(), client.getTree(), client.getTree()]);
+    expect(calls.filter((c) => c[0] === "tree")).toHaveLength(1);
+  });
+
+  it("tree 命令失败时抛 CmuxError", async () => {
+    const runner: CommandRunner = async (args) =>
+      args[0] === "tree"
+        ? { stdout: "", stderr: "cmux: socket not found", code: 1 }
+        : { stdout: "{}", stderr: "", code: 0 };
+    await expect(new CmuxCliClient({ runner }).getTree()).rejects.toBeInstanceOf(CmuxError);
+  });
+
+  it("cmux 在 JSON 前打印提示行也能解析", async () => {
+    const { runner } = makeRunner({
+      tree: `cmux: 'tree' is now an alias...\n${JSON.stringify(RAW_TREE)}`,
+    });
+    const tree = await new CmuxCliClient({ runner }).getTree();
+    expect(tree.workspaces).toHaveLength(2);
+  });
+
+  it("readSurface 用 base64 还原全屏内容并清洗 ANSI", async () => {
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner });
+    const snapshot = await client.readSurface("SURF-11");
+
+    expect(calls.at(-1)).toEqual(["read-screen", "--surface", "SURF-11", "--lines", "400", "--json"]);
+    expect(snapshot.content).toContain("Running pnpm test...");
+    expect(snapshot.content).toContain("14 tests passed");
+    // ANSI 序列与行尾空格被清掉
+    expect(snapshot.content).not.toMatch(/\[/);
+    expect(snapshot.content).not.toMatch(/ \n/);
+    // 连续空行被压缩
+    expect(snapshot.content).not.toContain("\n\n\n");
+    expect(snapshot.surfaceId).toBe("SURF-11");
+  });
+
+  it("内容不变时 revision 不变，变了才 +1", async () => {
+    let text = "hello";
+    const runner: CommandRunner = async (args) => {
+      if (args[0] === "read-screen") {
+        return { stdout: JSON.stringify({ surface_id: "S1", text }), stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    const client = new CmuxCliClient({ runner });
+
+    expect((await client.readSurface("S1")).revision).toBe(1);
+    expect((await client.readSurface("S1")).revision).toBe(1);
+    text = "hello world";
+    expect((await client.readSurface("S1")).revision).toBe(2);
+  });
+
+  it("surface 不存在时给出 SURFACE_NOT_FOUND", async () => {
+    const runner: CommandRunner = async () => ({ stdout: "", stderr: "unknown surface: surface:99", code: 1 });
+    const client = new CmuxCliClient({ runner });
+    await expect(client.readSurface("surface:99")).rejects.toMatchObject({ code: "SURFACE_NOT_FOUND" });
+  });
+
+  it("sendText / sendKey 走参数数组，不经过 shell", async () => {
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner });
+    await client.sendText("SURF-11", "继续修改；然后 $(rm -rf /) 重新运行测试");
+    await client.sendKey("SURF-11", "enter");
+
+    expect(calls.at(-2)).toEqual([
+      "send",
+      "--surface",
+      "SURF-11",
+      "--",
+      "继续修改；然后 $(rm -rf /) 重新运行测试",
+    ]);
+    expect(calls.at(-1)).toEqual(["send-key", "--surface", "SURF-11", "--", "enter"]);
+  });
+});
+
+describe("写操作必须显式指定 surface（§23.3）", () => {
+  it("空 surface 直接拒绝", () => {
+    expect(() => assertSurfaceTarget("")).toThrow();
+    expect(() => assertSurfaceTarget(undefined)).toThrow();
+    expect(() => buildSendTextArgs("", "hi")).toThrow();
+    expect(() => buildSendKeyArgs("   ", "enter")).toThrow();
+  });
+
+  it("以 - 开头的 prompt 不会被当成 flag", () => {
+    expect(buildSendTextArgs("S1", "--help")).toEqual(["send", "--surface", "S1", "--", "--help"]);
+  });
+});
+
+describe("超时与异常", () => {
+  it("runner 抛异常时向上冒泡，不会静默成功", async () => {
+    const runner = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const client = new CmuxCliClient({ runner: runner as unknown as CommandRunner });
+    await expect(client.getTree()).rejects.toThrow("boom");
+  });
+});

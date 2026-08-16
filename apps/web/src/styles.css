@@ -1,0 +1,619 @@
+/* CMUX Agent Remote —— 移动优先的深色 UI（需求文档 §26） */
+
+:root {
+  --bg: #0b0d10;
+  --bg-elevated: #14181d;
+  --bg-row: #12161b;
+  --border: #232a32;
+  --text: #e6e9ee;
+  --text-dim: #8b95a3;
+  --accent: #4ade80;
+  --attention: #fbbf24;
+  --error: #f87171;
+  --responded: #60a5fa;
+  --stale: #c084fc;
+  --radius: 12px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  overscroll-behavior-y: none;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.dim {
+  color: var(--text-dim);
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.boot {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-dim);
+}
+
+/* ---------- TopBar ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) 14px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.topbar-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.topbar-title-main {
+  font-weight: 600;
+  font-size: 17px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-title-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 26px;
+  line-height: 1;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.conn {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+
+.conn-open {
+  background: var(--accent);
+}
+
+.conn-connecting {
+  background: var(--attention);
+}
+
+.conn-closed {
+  background: var(--error);
+}
+
+.control-toggle {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.control-toggle.on {
+  border-color: var(--accent);
+  color: #0b0d10;
+  background: var(--accent);
+}
+
+/* ---------- 列表 ---------- */
+
+.scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 12px calc(24px + var(--safe-bottom));
+}
+
+.group {
+  margin-top: 18px;
+}
+
+.group-title {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  margin: 0 0 8px 4px;
+  font-weight: 700;
+}
+
+.agent-row {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+  text-align: left;
+  background: var(--bg-row);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.agent-row:active {
+  background: #171c22;
+}
+
+.agent-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-row-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.agent-row-activity {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-row-side {
+  text-align: right;
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.agent-row-surface {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-top: 4px;
+  opacity: 0.7;
+}
+
+.agent-kind {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+/* ---------- 状态 ---------- */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.status-glyph {
+  font-size: 12px;
+}
+
+.status-working {
+  color: var(--accent);
+}
+
+.status-attention {
+  color: var(--attention);
+}
+
+.status-responded {
+  color: var(--responded);
+}
+
+.status-idle {
+  color: var(--text-dim);
+}
+
+.status-stale {
+  color: var(--stale);
+}
+
+.status-error {
+  color: var(--error);
+}
+
+.status-closed {
+  color: #4b5563;
+}
+
+/* ---------- Workspace 页 ---------- */
+
+.pane-block {
+  margin-bottom: 14px;
+}
+
+.pane-title {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 6px 0 6px 4px;
+}
+
+.surface-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-row);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.surface-row.plain {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.surface-glyph {
+  width: 14px;
+  flex: none;
+  color: var(--accent);
+}
+
+.surface-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.surface-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.surface-meta {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 会话页 ---------- */
+
+.session-page {
+  height: 100%;
+}
+
+.session-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.session-agent {
+  font-weight: 600;
+}
+
+.session-timing {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+.session-activity {
+  width: 100%;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-warning {
+  width: 100%;
+  font-size: 12px;
+  color: var(--stale);
+}
+
+.output {
+  flex: 1;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0;
+  padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #d7dde5;
+  background: #0d1014;
+}
+
+.session-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+/* ---------- 输入区 ---------- */
+
+.composer {
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  padding: 10px 12px calc(10px + var(--safe-bottom));
+}
+
+.composer-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.danger-hint {
+  color: var(--error);
+}
+
+.composer-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.composer-input {
+  flex: 1;
+  resize: none;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0d1014;
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  /* 16px 以上，iOS 才不会自动放大页面 */
+  font-size: 16px;
+}
+
+.composer-input:disabled {
+  opacity: 0.5;
+}
+
+.send-button {
+  flex: none;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 18px;
+  background: var(--accent);
+  color: #08130c;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.send-button:disabled {
+  opacity: 0.4;
+}
+
+.key-bar {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.key-button {
+  flex: none;
+  border: 1px solid var(--border);
+  background: #0d1014;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  min-width: 52px;
+  cursor: pointer;
+}
+
+.key-button.danger {
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+
+.key-button.danger-armed {
+  background: var(--error);
+  color: #200;
+  font-weight: 700;
+}
+
+.key-button:disabled {
+  opacity: 0.4;
+}
+
+/* ---------- 其它 ---------- */
+
+.banner {
+  background: #1f2937;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin: 8px 0;
+  color: var(--attention);
+}
+
+.banner.error {
+  color: var(--error);
+}
+
+.empty {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 48px 16px;
+}
+
+.empty-hint {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.footer-actions {
+  display: flex;
+  gap: 8px;
+  margin: 24px 0 8px;
+}
+
+.ghost-button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--responded);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  padding: 0 4px;
+}
+
+/* ---------- 登录 ---------- */
+
+.login {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+}
+
+.login-card h1 {
+  font-size: 20px;
+  margin: 0 0 6px;
+}
+
+.login-hint {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0 0 18px;
+}
+
+.login-input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0d1014;
+  color: var(--text);
+  padding: 12px 14px;
+  font-size: 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.12em;
+  margin-bottom: 12px;
+}
+
+.primary-button {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--accent);
+  color: #08130c;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.login-error {
+  margin-top: 12px;
+  color: var(--error);
+  font-size: 13px;
+}
+
+@media (min-width: 768px) {
+  .scroll-area,
+  .session-header,
+  .session-tools,
+  .composer,
+  .output {
+    max-width: 860px;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+  }
+}

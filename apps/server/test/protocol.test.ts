@@ -1,0 +1,124 @@
+import { describe, expect, it } from "vitest";
+import {
+  AgentEventSchema,
+  ALLOWED_KEYS,
+  ATTENTION_PRIORITY,
+  attentionGroupOf,
+  isDangerousKey,
+  normalizeKey,
+  SurfaceInputRequestSchema,
+  SurfaceKeyRequestSchema,
+  type AgentStatus,
+} from "@car/protocol";
+import { fingerprint, formatAgo, formatDuration, lastLines, stripAnsi, tidyTerminalText } from "@car/shared";
+
+describe("统一状态模型（§8）", () => {
+  it("Attention 优先级顺序与文档一致", () => {
+    const ordered = (Object.keys(ATTENTION_PRIORITY) as AgentStatus[]).sort(
+      (a, b) => ATTENTION_PRIORITY[a] - ATTENTION_PRIORITY[b],
+    );
+    expect(ordered).toEqual([
+      "ERROR",
+      "NEEDS_APPROVAL",
+      "NEEDS_INPUT",
+      "RESPONDED_UNREAD",
+      "POSSIBLY_STALE",
+      "WORKING",
+      "IDLE",
+      "CLOSED",
+    ]);
+  });
+
+  it("状态分组：NEEDS YOU / WORKING / IDLE", () => {
+    expect(attentionGroupOf("NEEDS_APPROVAL")).toBe("NEEDS_YOU");
+    expect(attentionGroupOf("RESPONDED_UNREAD")).toBe("NEEDS_YOU");
+    expect(attentionGroupOf("ERROR")).toBe("NEEDS_YOU");
+    expect(attentionGroupOf("WORKING")).toBe("WORKING");
+    expect(attentionGroupOf("POSSIBLY_STALE")).toBe("WORKING");
+    expect(attentionGroupOf("IDLE")).toBe("IDLE");
+    expect(attentionGroupOf("CLOSED")).toBe("IDLE");
+  });
+});
+
+describe("统一事件（§10）", () => {
+  it("接受完整事件", () => {
+    const parsed = AgentEventSchema.safeParse({
+      version: 1,
+      agent: "codex",
+      event: "needs_approval",
+      timestamp: 1,
+      surfaceId: "SURF-1",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("拒绝未知 agent 与未知事件", () => {
+    expect(AgentEventSchema.safeParse({ version: 1, agent: "cursor", event: "activity", timestamp: 1 }).success).toBe(
+      false,
+    );
+    expect(AgentEventSchema.safeParse({ version: 1, agent: "codex", event: "explode", timestamp: 1 }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("按键白名单（§22 / §23.4）", () => {
+  it("第一版只放行六个键", () => {
+    expect([...ALLOWED_KEYS]).toEqual(["enter", "escape", "tab", "up", "down", "ctrl+c"]);
+  });
+
+  it("常见别名能归一", () => {
+    expect(normalizeKey("Esc")).toBe("escape");
+    expect(normalizeKey("ArrowUp")).toBe("up");
+    expect(normalizeKey(" Ctrl-C ")).toBe("ctrl+c");
+    expect(normalizeKey("F5")).toBeNull();
+  });
+
+  it("Ctrl+C 属于危险操作", () => {
+    expect(isDangerousKey("ctrl+c")).toBe(true);
+    expect(isDangerousKey("enter")).toBe(false);
+  });
+
+  it("请求体校验", () => {
+    expect(SurfaceKeyRequestSchema.safeParse({ key: "enter" }).success).toBe(true);
+    expect(SurfaceKeyRequestSchema.safeParse({ key: "delete" }).success).toBe(false);
+    expect(SurfaceInputRequestSchema.parse({ text: "hi" }).submit).toBe(true);
+    expect(SurfaceInputRequestSchema.safeParse({ text: "x".repeat(20001) }).success).toBe(false);
+  });
+});
+
+describe("终端文本清洗", () => {
+  it("去掉 ANSI 与控制字符", () => {
+    const raw = "\u001b[31mRed\u001b[0m\u001b]0;title\u0007 text\r\nline2";
+    expect(stripAnsi(raw)).toBe("Red text\nline2");
+  });
+
+  it("压缩空行、去掉行尾空格", () => {
+    expect(tidyTerminalText("a   \n\n\n\n b \n\n")).toBe("a\n\n b");
+  });
+
+  it("只保留最后 n 行", () => {
+    expect(lastLines("1\n2\n3\n4", 2)).toBe("3\n4");
+    expect(lastLines("1\n2", 5)).toBe("1\n2");
+  });
+
+  it("指纹用于判断内容是否变化", () => {
+    expect(fingerprint("abc")).toBe(fingerprint("abc"));
+    expect(fingerprint("abc")).not.toBe(fingerprint("abd"));
+  });
+});
+
+describe("时间展示", () => {
+  it("formatAgo", () => {
+    const now = 1_000_000;
+    expect(formatAgo(now - 18_000, now)).toBe("18s ago");
+    expect(formatAgo(now - 120_000, now)).toBe("2m ago");
+    expect(formatAgo(now - 7_200_000, now)).toBe("2h ago");
+  });
+
+  it("formatDuration", () => {
+    expect(formatDuration(32_000)).toBe("32s");
+    expect(formatDuration(272_000)).toBe("4m 32s");
+    expect(formatDuration(3_780_000)).toBe("1h 03m");
+  });
+});

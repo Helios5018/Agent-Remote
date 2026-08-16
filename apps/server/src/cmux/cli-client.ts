@@ -1,0 +1,127 @@
+import type { CmuxKey, CmuxTree, SurfaceSnapshot } from "@car/protocol";
+import { createSingleFlight, TtlCache } from "@car/shared";
+import { CmuxError, type CmuxClient, type ReadSurfaceOptions } from "./client.ts";
+import {
+  buildReadScreenArgs,
+  buildSendKeyArgs,
+  buildSendTextArgs,
+  TOP_ARGS,
+  TREE_ARGS,
+} from "./control.ts";
+import { parseTopJson, parseTree } from "./discovery.ts";
+import { parseReadScreenJson, SnapshotTracker } from "./output.ts";
+import { createCliRunner, type CommandRunner } from "./exec.ts";
+
+export interface CmuxCliClientOptions {
+  runner?: CommandRunner;
+  /** tree/top 结果的缓存时间，默认 1s；避免多个客户端把 CLI 打爆。 */
+  treeTtlMs?: number;
+  now?: () => number;
+  snapshotTracker?: SnapshotTracker;
+  maxOutputLines?: number;
+}
+
+/** 第一版实现：通过 cmux CLI 与 cmux 通信。 */
+export class CmuxCliClient implements CmuxClient {
+  private readonly runner: CommandRunner;
+  private readonly now: () => number;
+  private readonly treeCache: TtlCache<CmuxTree>;
+  private readonly treeFlight = createSingleFlight<CmuxTree>();
+  readonly snapshots: SnapshotTracker;
+  private readonly maxOutputLines: number;
+
+  constructor(options: CmuxCliClientOptions = {}) {
+    this.runner = options.runner ?? createCliRunner();
+    this.now = options.now ?? Date.now;
+    this.treeCache = new TtlCache<CmuxTree>(options.treeTtlMs ?? 1000, this.now);
+    this.maxOutputLines = options.maxOutputLines ?? 400;
+    this.snapshots = options.snapshotTracker ?? new SnapshotTracker({ maxLines: this.maxOutputLines });
+  }
+
+  async ping(): Promise<boolean> {
+    const result = await this.runner(["ping"], { timeoutMs: 3000 });
+    return result.code === 0 && /pong/i.test(result.stdout);
+  }
+
+  async getTree(): Promise<CmuxTree> {
+    const cached = this.treeCache.get("tree");
+    if (cached) return cached;
+
+    return this.treeFlight("tree", async () => {
+      const cachedInFlight = this.treeCache.get("tree");
+      if (cachedInFlight) return cachedInFlight;
+
+      const [treeResult, topResult] = await Promise.all([
+        this.runner(TREE_ARGS, { timeoutMs: 8000 }),
+        this.runner(TOP_ARGS, { timeoutMs: 12_000 }),
+      ]);
+
+      if (treeResult.code !== 0) {
+        throw new CmuxError("无法获取 cmux 拓扑", "CMUX_UNAVAILABLE", treeResult.stderr.trim());
+      }
+
+      const rawTree = parseJson(treeResult.stdout);
+      if (!rawTree) {
+        throw new CmuxError("cmux tree 输出不是合法 JSON", "CMUX_COMMAND_FAILED", treeResult.stdout.slice(0, 200));
+      }
+
+      // top 失败不致命：拿不到进程信息只是识别不出 Agent，拓扑仍然可用。
+      const rawTop = topResult.code === 0 ? parseJson(topResult.stdout) : null;
+      const processMap = parseTopJson(rawTop ?? {});
+
+      const tree = parseTree(rawTree, processMap, this.now());
+      this.treeCache.set("tree", tree);
+      return tree;
+    });
+  }
+
+  /** 强制重新拉取拓扑（例如收到 hook 之后）。 */
+  invalidateTree(): void {
+    this.treeCache.clear();
+  }
+
+  async readSurface(surfaceId: string, options: ReadSurfaceOptions = {}): Promise<SurfaceSnapshot> {
+    const args = buildReadScreenArgs(surfaceId, options.lines ?? this.maxOutputLines, options.scrollback ?? false);
+    const result = await this.runner(args, { timeoutMs: 8000 });
+    if (result.code !== 0) {
+      const message = result.stderr.trim();
+      if (/not found|no such|unknown surface/i.test(message)) {
+        throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND", message);
+      }
+      throw new CmuxError(`读取 surface 失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", message);
+    }
+    const parsed = parseReadScreenJson(parseJson(result.stdout) ?? {});
+    const { snapshot } = this.snapshots.update(parsed.surfaceId ?? surfaceId, parsed.text, this.now(), {
+      surfaceRef: parsed.surfaceRef,
+      workspaceId: parsed.workspaceId,
+    });
+    return snapshot;
+  }
+
+  async sendText(surfaceId: string, text: string): Promise<void> {
+    const result = await this.runner(buildSendTextArgs(surfaceId, text), { timeoutMs: 8000 });
+    if (result.code !== 0) {
+      throw new CmuxError(`发送文本失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", result.stderr.trim());
+    }
+  }
+
+  async sendKey(surfaceId: string, key: CmuxKey): Promise<void> {
+    const result = await this.runner(buildSendKeyArgs(surfaceId, key), { timeoutMs: 8000 });
+    if (result.code !== 0) {
+      throw new CmuxError(`发送按键失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", result.stderr.trim());
+    }
+  }
+}
+
+function parseJson(text: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  // cmux 偶尔会在 JSON 前打印一行提示（例如别名弃用通知）。
+  const start = trimmed.indexOf("{");
+  if (start < 0) return null;
+  try {
+    return JSON.parse(trimmed.slice(start));
+  } catch {
+    return null;
+  }
+}

@@ -1,0 +1,99 @@
+/**
+ * 极薄的 SQLite 驱动抽象。
+ *
+ * 服务运行在 Bun 上（bun:sqlite），测试跑在 Node 上（node:sqlite），
+ * 两边 API 略有差别，这里统一成一个接口；都不可用时退化为内存实现，
+ * 保证 Hook / 状态功能在任何环境下都不会因为存储而崩掉。
+ */
+export interface SqlDatabase {
+  exec(sql: string): void;
+  run(sql: string, params?: unknown[]): void;
+  all<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[];
+  get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | undefined;
+  close(): void;
+  readonly driver: "bun" | "node" | "memory";
+}
+
+export async function openDatabase(path: string): Promise<SqlDatabase> {
+  if (typeof (globalThis as { Bun?: unknown }).Bun !== "undefined") {
+    try {
+      // 变量化模块名，避免 TS / 打包器在非 Bun 环境下解析 bun:sqlite。
+      const moduleName = "bun:sqlite";
+      const { Database } = (await import(/* @vite-ignore */ moduleName)) as unknown as {
+        Database: new (path: string, options?: unknown) => BunDb;
+      };
+      const db = new Database(path, { create: true });
+      return wrapBun(db);
+    } catch {
+      // 落到下面的 node:sqlite / memory
+    }
+  }
+
+  try {
+    // 用 createRequire 而不是 import()：打包器（vite/vitest）会重写动态 import，
+    // 把 node:sqlite 解析成不存在的文件；require 则原样交给 Node。
+    const { createRequire } = await import("node:module");
+    const nodeRequire = createRequire(import.meta.url);
+    const { DatabaseSync } = nodeRequire("node:sqlite") as {
+      DatabaseSync: new (path: string) => NodeDb;
+    };
+    return wrapNode(new DatabaseSync(path));
+  } catch {
+    return createMemoryDatabase();
+  }
+}
+
+interface BunDb {
+  run(sql: string, params?: unknown[]): void;
+  query(sql: string): { all(...params: unknown[]): unknown[]; get(...params: unknown[]): unknown };
+  exec(sql: string): void;
+  close(): void;
+}
+
+function wrapBun(db: BunDb): SqlDatabase {
+  return {
+    driver: "bun",
+    exec: (sql) => db.exec(sql),
+    run: (sql, params = []) => {
+      db.run(sql, params);
+    },
+    all: <T>(sql: string, params: unknown[] = []) => db.query(sql).all(...params) as T[],
+    get: <T>(sql: string, params: unknown[] = []) => (db.query(sql).get(...params) ?? undefined) as T | undefined,
+    close: () => db.close(),
+  };
+}
+
+interface NodeDb {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    run(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown[];
+    get(...params: unknown[]): unknown;
+  };
+  close(): void;
+}
+
+function wrapNode(db: NodeDb): SqlDatabase {
+  return {
+    driver: "node",
+    exec: (sql) => db.exec(sql),
+    run: (sql, params = []) => {
+      db.prepare(sql).run(...params);
+    },
+    all: <T>(sql: string, params: unknown[] = []) => db.prepare(sql).all(...params) as T[],
+    get: <T>(sql: string, params: unknown[] = []) => (db.prepare(sql).get(...params) ?? undefined) as T | undefined,
+    close: () => db.close(),
+  };
+}
+
+/** 没有 SQLite 时的兜底：什么都不存，只保证接口可用。 */
+export function createMemoryDatabase(): SqlDatabase {
+  return {
+    driver: "memory",
+    exec: () => {},
+    run: () => {},
+    all: <T>() => [] as T[],
+    get: <T>() => undefined as T | undefined,
+    close: () => {},
+  };
+}
