@@ -65,6 +65,11 @@ export class StateEngine {
   private restore(): void {
     if (!this.store) return;
     for (const row of this.store.loadAll()) {
+      // 上次运行就已经退出的 Agent 不用恢复，等 syncTree 决定谁还活着。
+      if (row.status === "CLOSED") {
+        this.store.deleteAgent(row.surfaceId);
+        continue;
+      }
       // 重启后不继承 WORKING：进程还在不在要等第一次 syncTree 才知道。
       this.agents.set(row.surfaceId, {
         id: row.surfaceId,
@@ -421,6 +426,11 @@ export class StateEngine {
         this.agents.delete(surfaceId);
         this.closedAt.delete(surfaceId);
         this.outputChangedAt.delete(surfaceId);
+        try {
+          this.store?.deleteAgent(surfaceId);
+        } catch {
+          // 存储不可用不影响主链路
+        }
       }
     }
   }

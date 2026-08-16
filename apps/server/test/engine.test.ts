@@ -354,3 +354,39 @@ describe("状态持久化", () => {
     expect(engine.get("SURF-11")?.status).toBe("WORKING");
   });
 });
+
+describe("退出的 Agent 会被彻底清理", () => {
+  it("过了保留期后从内存和 SQLite 里一起删除", async () => {
+    const clock = new Clock();
+    const store = await StateStore.open(":memory:");
+    const engine = new StateEngine({ now: clock.now, store });
+    engine.syncTree(buildTree(clock.value));
+    expect(store.loadAll()).toHaveLength(3);
+
+    const empty = buildTree(clock.value);
+    empty.workspaces = [];
+    engine.syncTree(empty);
+    clock.advance(6 * 60 * 1000);
+    engine.tick();
+
+    expect(engine.list()).toHaveLength(0);
+    expect(store.loadAll()).toHaveLength(0);
+    store.close();
+  });
+
+  it("重启时不恢复上次已经退出的 Agent", async () => {
+    const clock = new Clock();
+    const store = await StateStore.open(":memory:");
+    const first = new StateEngine({ now: clock.now, store });
+    first.syncTree(buildTree(clock.value));
+    const empty = buildTree(clock.value);
+    empty.workspaces = [];
+    first.syncTree(empty);
+    expect(store.loadAll().every((row) => row.status === "CLOSED")).toBe(true);
+
+    const revived = new StateEngine({ now: clock.now, store });
+    expect(revived.list()).toHaveLength(0);
+    expect(store.loadAll()).toHaveLength(0);
+    store.close();
+  });
+});

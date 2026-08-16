@@ -151,6 +151,11 @@ export class StateStore {
     }));
   }
 
+  /** Agent 已经彻底消失（进程退出且过了保留期）时清掉，避免历史记录无限堆积。 */
+  deleteAgent(surfaceId: string): void {
+    this.db.run(`DELETE FROM agent_sessions WHERE surface_id = ?`, [surfaceId]);
+  }
+
   /** 操作审计：谁在什么时候对哪个 surface 做了什么写操作。 */
   audit(entry: AuditEntry): void {
     this.db.run(`INSERT INTO audit_log (at, action, surface_id, detail) VALUES (?,?,?,?)`, [

@@ -214,7 +214,7 @@ Hook 与 surface 的关联顺序：`CMUX_SURFACE_ID` → pid 反查 cmux 进程�
 ## 开发
 
 ```bash
-bun run test          # Vitest，163 个用例
+bun run test          # Vitest，165 个用例
 bun run typecheck     # tsc --noEmit
 bun run dev           # 服务端（watch）
 bun run dev:web       # 前端 dev server（:4319，代理到 :4318）
