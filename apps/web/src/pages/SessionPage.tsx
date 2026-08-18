@@ -4,9 +4,12 @@ import { AGENT_DISPLAY_NAME, STATUS_LABEL } from "@car/protocol";
 import { formatAgo, formatDuration } from "@car/shared";
 import { Composer } from "../components/Composer.tsx";
 import { StatusBadge } from "../components/StatusBadge.tsx";
+import { TerminalGrid, type GridLayout } from "../components/TerminalGrid.tsx";
 import { ControlToggle, TopBar } from "../components/TopBar.tsx";
 import { findAgent, findSurface, useAppStore } from "../stores/AppStore.tsx";
 import type { Route } from "../hooks/useRouter.ts";
+
+const LAYOUT_KEY = "car.session.layout.v1";
 
 /** Agent 会话页（需求文档 §7）：使用频率最高的页面。 */
 export function SessionPage({
@@ -21,36 +24,41 @@ export function SessionPage({
   const {
     inbox,
     tree,
-    contents,
+    grids,
     openSession,
     subscribe,
     sendInput,
     sendKey,
-    refreshOutput,
+    refreshGrid,
     refreshTree,
     session,
     error,
   } = useAppStore();
   const [agent, setAgent] = useState<AgentState | null>(() => findAgent(inbox, surfaceId) ?? null);
   const [now, setNow] = useState(() => Date.now());
-  const outputRef = useRef<HTMLPreElement | null>(null);
+  const [layoutPref, setLayoutPref] = useState<GridLayout | "auto">(readLayoutPref);
+  const outputRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
 
   const liveAgent = findAgent(inbox, surfaceId) ?? agent;
   const placement = findSurface(tree, surfaceId);
-  const content = contents[surfaceId]?.content ?? "";
+  const grid = grids[surfaceId];
   const controlMode = session?.controlMode === true;
+
+  // 自动：全屏 TUI 等比缩放保住边框，普通输出按屏宽软换行
+  const layout: GridLayout = layoutPref === "auto" ? (grid?.altScreen ? "fit" : "flow") : layoutPref;
 
   // store 里的函数会随状态刷新而换引用；用 ref 固定住，
   // 否则一旦请求失败就会「失败 → 状态更新 → 重新请求」无限重试。
-  const actionsRef = useRef({ openSession, subscribe, refreshTree });
-  actionsRef.current = { openSession, subscribe, refreshTree };
+  const actionsRef = useRef({ openSession, subscribe, refreshTree, refreshGrid });
+  actionsRef.current = { openSession, subscribe, refreshTree, refreshGrid };
 
   useEffect(() => {
     let cancelled = false;
     actionsRef.current.subscribe(surfaceId);
     // 直接从 #/s/:id 进来时树还没拉过，标题要靠它。
     void actionsRef.current.refreshTree();
+    void actionsRef.current.refreshGrid(surfaceId);
     void actionsRef.current.openSession(surfaceId).then((result) => {
       if (result && !cancelled) setAgent(result);
     });
@@ -59,6 +67,14 @@ export function SessionPage({
       actionsRef.current.subscribe(null);
     };
   }, [surfaceId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LAYOUT_KEY, layoutPref);
+    } catch {
+      // 隐私模式写不了，忽略
+    }
+  }, [layoutPref]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -70,7 +86,7 @@ export function SessionPage({
     const element = outputRef.current;
     if (!element || !stickToBottom.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [content]);
+  }, [grid?.revision, layout]);
 
   const onScroll = () => {
     const element = outputRef.current;
@@ -126,28 +142,67 @@ export function SessionPage({
 
       {error ? <div className="banner error">{error}</div> : null}
 
-      <pre className="output" ref={outputRef} onScroll={onScroll}>
-        {content || "（暂无输出）"}
-      </pre>
+      <div className="output" ref={outputRef} onScroll={onScroll}>
+        {grid ? (
+          <TerminalGrid grid={grid} layout={layout} />
+        ) : (
+          <div className="output-empty dim">（正在读取终端画面…）</div>
+        )}
+      </div>
 
       <div className="session-tools">
-        <button type="button" className="ghost-button" onClick={() => void refreshOutput(surfaceId)}>
+        <button type="button" className="ghost-button" onClick={() => void refreshGrid(surfaceId)}>
           手动刷新
         </button>
-        <span className="dim mono">rev {contents[surfaceId]?.revision ?? 0}</span>
+        <div className="session-tools-right">
+          {grid ? (
+            <span className="dim mono">
+              {grid.columns}×{grid.viewportRows}
+              {grid.altScreen ? " · TUI" : ""}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="chip-button"
+            title={
+              layoutPref === "auto"
+                ? "当前：自动（TUI 缩放 / 普通输出换行）"
+                : layoutPref === "fit"
+                  ? "当前：整屏缩放到屏宽"
+                  : "当前：按屏宽换行"
+            }
+            onClick={() =>
+              setLayoutPref((current) =>
+                current === "auto" ? "fit" : current === "fit" ? "flow" : "auto",
+              )
+            }
+          >
+            {layoutPref === "auto" ? "自动" : layoutPref === "fit" ? "缩放" : "换行"}
+          </button>
+        </div>
       </div>
 
       <Composer
         disabled={!controlMode}
         onSend={async (text, submit) => {
           await sendInput(surfaceId, text, submit);
-          await refreshOutput(surfaceId);
+          await refreshGrid(surfaceId);
         }}
         onKey={async (key, confirm) => {
           await sendKey(surfaceId, key, confirm);
-          await refreshOutput(surfaceId);
+          await refreshGrid(surfaceId);
         }}
       />
     </div>
   );
+}
+
+function readLayoutPref(): GridLayout | "auto" {
+  try {
+    const saved = window.localStorage.getItem(LAYOUT_KEY);
+    if (saved === "fit" || saved === "flow") return saved;
+  } catch {
+    // 读不到就用自动
+  }
+  return "auto";
 }

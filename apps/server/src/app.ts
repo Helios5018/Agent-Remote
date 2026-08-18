@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { SERVER_VERSION } from "@car/protocol";
 import { createAgentRoutes } from "./api/agents.ts";
 import { createAuthRoutes } from "./api/auth.ts";
@@ -25,6 +26,8 @@ export function createApp(ctx: AppContext) {
   app.route("/api/auth", createAuthRoutes(ctx));
 
   const api = new Hono<Env>();
+  // 渲染网格一帧未压缩有 20~80 KB，手机上必须压；其余接口顺带受益。
+  api.use("*", compress());
   api.use("*", requireAuth(ctx));
   api.route("/agents", createAgentRoutes(ctx));
   api.route("/tree", createWorkspaceRoutes(ctx));

@@ -52,6 +52,8 @@ export function createWebSocketHandlers(ctx: AppContext) {
   return {
     /** Bun.serve 的 websocket handler。 */
     websocket: {
+      // 网格帧一帧 20~80 KB，且全是重复的空格与十六进制色值，压缩率极高。
+      perMessageDeflate: true,
       open(ws: BunWebSocket) {
         const client = ctx.hub.add(
           (message: ServerMessage) => ws.send(JSON.stringify(message)),

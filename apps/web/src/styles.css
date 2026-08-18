@@ -585,19 +585,75 @@ body {
 
 .output {
   flex: 1;
-  /* 不加这行，pre 的内容高度会把输入区顶出屏幕 */
+  /* 不加这行，内容高度会把输入区顶出屏幕 */
   min-height: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   margin: 0;
-  padding: 12px 14px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12.5px;
-  line-height: 1.5;
+  padding: 10px 12px;
+  background: #0d1014;
+}
+
+.output-empty {
+  padding: 20px 2px;
+  font-size: 13px;
+}
+
+/* ---------- 终端渲染网格 ---------- */
+
+.tgrid {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* 连字会让字符不再等宽，直接关掉 */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  line-height: 1.32;
+}
+
+/* 量单格字符宽度用的探针，不占位 */
+.tgrid-probe {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+  font-family: inherit;
+}
+
+.tgrid-body {
+  position: relative;
+}
+
+/* fit：一行一个定位容器，段按列号绝对定位，不受浏览器字体度量影响 */
+.tgrid-row {
+  position: relative;
+  height: 1.32em;
+  white-space: pre;
+}
+
+.tgrid-span {
+  position: absolute;
+  top: 0;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.tgrid-cursor {
+  position: absolute;
+  top: 0;
+  height: 1.32em;
+  opacity: 0.75;
+}
+
+/* flow：按容器宽度软换行，普通命令输出用这个 */
+.tgrid-line {
   white-space: pre-wrap;
   word-break: break-word;
-  color: #d7dde5;
-  background: #0d1014;
+  min-height: 1.32em;
+}
+
+.session-tools-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .session-tools {

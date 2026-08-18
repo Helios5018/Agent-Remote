@@ -42,6 +42,8 @@ export class Poller {
   private lastTreeAt = 0;
   private readonly nextDueAt = new Map<string, number>();
   private readonly inflight = new Set<string>();
+  /** 每个 surface 最近推送过的网格 revision，避免重复推同一帧。 */
+  private readonly gridRevisions = new Map<string, number>();
 
   constructor(options: PollerOptions) {
     this.client = options.client;
@@ -154,32 +156,59 @@ export class Poller {
 
   private async refreshSurface(surfaceId: string): Promise<void> {
     this.inflight.add(surfaceId);
+    const viewed = this.hub.viewedSurfaces().includes(surfaceId);
     try {
-      const before = this.engine.get(surfaceId)?.outputRevision ?? 0;
-      const snapshot = await this.client.readSurface(surfaceId);
-      const changed = snapshot.revision !== before;
-
-      const updated = this.engine.applyOutput(surfaceId, changed, snapshot.revision);
-      if (changed) {
-        // 内容变化才推送（需求文档 §18）。
-        this.hub.sendToViewers(surfaceId, {
-          type: "surface.snapshot",
-          surfaceId,
-          revision: snapshot.revision,
-          content: snapshot.content,
-        });
-      }
-      if (updated) {
-        this.hub.broadcast({ type: "agent.list_changed", inbox: this.engine.inbox() });
-      }
+      // 正在查看的 surface 读彩色网格（贵但保真），其余只读纯文本做变化检测。
+      if (viewed) await this.refreshGrid(surfaceId);
+      else await this.refreshText(surfaceId);
     } catch (error) {
-      this.onError?.(error, `readSurface:${surfaceId}`);
+      this.onError?.(error, `${viewed ? "readGrid" : "readSurface"}:${surfaceId}`);
     } finally {
       this.inflight.delete(surfaceId);
       const current = this.engine.get(surfaceId);
       const isViewed = this.hub.viewedSurfaces().includes(surfaceId);
       const interval = current ? this.intervalFor(current, isViewed) : null;
       this.nextDueAt.set(surfaceId, this.now() + (interval ?? REFRESH_INTERVAL_MS.idle));
+    }
+  }
+
+  /** 后台刷新：纯文本，只为判断「有没有变化」。 */
+  private async refreshText(surfaceId: string): Promise<void> {
+    const before = this.engine.get(surfaceId)?.outputRevision ?? 0;
+    const snapshot = await this.client.readSurface(surfaceId);
+    const changed = snapshot.revision !== before;
+
+    const updated = this.engine.applyOutput(surfaceId, changed, snapshot.revision);
+    if (changed) {
+      // 内容变化才推送（需求文档 §18）。
+      this.hub.sendToViewers(surfaceId, {
+        type: "surface.snapshot",
+        surfaceId,
+        revision: snapshot.revision,
+        content: snapshot.content,
+      });
+    }
+    if (updated) {
+      this.hub.broadcast({ type: "agent.list_changed", inbox: this.engine.inbox() });
+    }
+  }
+
+  /** 前台刷新：彩色渲染网格。 */
+  private async refreshGrid(surfaceId: string): Promise<void> {
+    const grid = await this.client.readGrid(surfaceId);
+    const lastSent = this.gridRevisions.get(surfaceId);
+    if (lastSent === grid.revision) return;
+
+    this.gridRevisions.set(surfaceId, grid.revision);
+    this.hub.sendToViewers(surfaceId, { type: "surface.grid", surfaceId, grid });
+
+    // 第一次读到网格只是「打开会话」，不算 Agent 活动；
+    // 而且网格与纯文本的 revision 是两套编号，不能直接喂给 engine。
+    if (lastSent === undefined) return;
+    const before = this.engine.get(surfaceId)?.outputRevision ?? 0;
+    const updated = this.engine.applyOutput(surfaceId, true, before + 1);
+    if (updated) {
+      this.hub.broadcast({ type: "agent.list_changed", inbox: this.engine.inbox() });
     }
   }
 

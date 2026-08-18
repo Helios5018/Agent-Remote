@@ -17,6 +17,7 @@ import type {
   Inbox,
   ServerMessage,
   SessionInfo,
+  SurfaceGrid,
 } from "@car/protocol";
 import { api, ApiError } from "../api.ts";
 import { useRealtime, type ConnectionState } from "../hooks/useRealtime.ts";
@@ -35,6 +36,8 @@ interface AppStoreValue {
   connection: ConnectionState;
   error: string | null;
   contents: Record<string, SurfaceContent>;
+  /** surfaceId → 彩色渲染网格。 */
+  grids: Record<string, SurfaceGrid>;
 
   login(token: string): Promise<void>;
   logout(): Promise<void>;
@@ -46,6 +49,7 @@ interface AppStoreValue {
   sendInput(surfaceId: string, text: string, submit: boolean): Promise<void>;
   sendKey(surfaceId: string, key: CmuxKey, confirm?: boolean): Promise<void>;
   refreshOutput(surfaceId: string): Promise<void>;
+  refreshGrid(surfaceId: string): Promise<void>;
   clearError(): void;
 }
 
@@ -57,6 +61,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [inbox, setInbox] = useState<Inbox | null>(null);
   const [tree, setTree] = useState<CmuxTree | null>(null);
   const [contents, setContents] = useState<Record<string, SurfaceContent>>({});
+  const [grids, setGrids] = useState<Record<string, SurfaceGrid>>({});
   const [error, setError] = useState<string | null>(null);
   const authenticated = session?.authenticated === true;
   const inboxRef = useRef<Inbox | null>(null);
@@ -75,6 +80,9 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           ...current,
           [message.surfaceId]: { content: message.content, revision: message.revision },
         }));
+        break;
+      case "surface.grid":
+        setGrids((current) => ({ ...current, [message.surfaceId]: message.grid }));
         break;
       default:
         break;
@@ -122,6 +130,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     [withError],
   );
 
+  const refreshGrid = useCallback(
+    async (surfaceId: string) => {
+      const grid = await withError(() => api.grid(surfaceId));
+      if (grid) setGrids((current) => ({ ...current, [surfaceId]: grid }));
+    },
+    [withError],
+  );
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -159,6 +175,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       connection,
       error,
       contents,
+      grids,
 
       async login(token: string) {
         const info = await withError(() => api.login(token));
@@ -170,6 +187,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         if (info) setSession(info);
         setInbox(null);
         setTree(null);
+        setGrids({});
       },
 
       async setControlMode(enabled: boolean) {
@@ -189,7 +207,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           setError(null);
         } catch (caught) {
           if (caught instanceof ApiError && caught.status === 404) {
-            await refreshOutput(surfaceId);
+            // 非 Agent 的 surface 没有状态，但照样能看彩色画面
+            await refreshGrid(surfaceId);
             return null;
           }
           if (caught instanceof ApiError && caught.status === 401) {
@@ -219,6 +238,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       },
 
       refreshOutput,
+      refreshGrid,
 
       clearError: () => setError(null),
     }),
@@ -230,9 +250,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       connection,
       error,
       contents,
+      grids,
       refreshInbox,
       refreshTree,
       refreshOutput,
+      refreshGrid,
       subscribe,
       withError,
     ],

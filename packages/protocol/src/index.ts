@@ -1,5 +1,6 @@
 export * from "./agent.ts";
 export * from "./cmux.ts";
+export * from "./grid.ts";
 export * from "./api.ts";
 export * from "./realtime.ts";
 

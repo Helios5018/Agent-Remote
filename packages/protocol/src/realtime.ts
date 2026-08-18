@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentStateSchema, AgentStatusSchema, InboxSchema } from "./agent.ts";
+import { SurfaceGridSchema } from "./grid.ts";
 
 /** 服务端 → 浏览器（需求文档 §17）。 */
 
@@ -20,6 +21,13 @@ export const SurfaceSnapshotMessageSchema = z.object({
   surfaceId: z.string(),
   revision: z.number().int().nonnegative(),
   content: z.string(),
+});
+
+/** 正在查看的 surface 推送彩色渲染网格（§26 终端保真）。 */
+export const SurfaceGridMessageSchema = z.object({
+  type: z.literal("surface.grid"),
+  surfaceId: z.string(),
+  grid: SurfaceGridSchema,
 });
 
 export const HelloMessageSchema = z.object({
@@ -46,6 +54,7 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   AgentStatusChangedSchema,
   AgentListChangedSchema,
   SurfaceSnapshotMessageSchema,
+  SurfaceGridMessageSchema,
   ErrorMessageSchema,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;

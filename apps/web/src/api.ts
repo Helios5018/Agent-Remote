@@ -3,6 +3,7 @@ import type {
   CmuxKey,
   Inbox,
   SessionInfo,
+  SurfaceGrid,
   SurfaceSnapshot,
   TreeResponse,
 } from "@car/protocol";
@@ -65,6 +66,9 @@ export const api = {
 
   output: (surfaceId: string) =>
     request<SurfaceSnapshot>(`/api/surfaces/${encodeURIComponent(surfaceId)}/output`),
+
+  /** 彩色渲染网格（颜色 / 粗体 / 反显 / 光标 / 格子宽度）。 */
+  grid: (surfaceId: string) => request<SurfaceGrid>(`/api/surfaces/${encodeURIComponent(surfaceId)}/grid`),
 
   sendInput: (surfaceId: string, text: string, submit: boolean) =>
     request<{ ok: true }>(`/api/surfaces/${encodeURIComponent(surfaceId)}/input`, {

@@ -1,4 +1,4 @@
-import type { CmuxKey, CmuxTree, SurfaceSnapshot } from "@car/protocol";
+import type { CmuxKey, CmuxTree, GridSpan, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
 import type { CmuxClient, ReadSurfaceOptions } from "./client.ts";
 import { SnapshotTracker } from "./output.ts";
 
@@ -29,6 +29,7 @@ export class FakeCmuxClient implements CmuxClient {
   readonly sentText: Array<{ surfaceId: string; text: string }> = [];
   readonly sentKeys: Array<{ surfaceId: string; key: CmuxKey }> = [];
   private readonly snapshots = new SnapshotTracker();
+  private readonly gridRevisions = new Map<string, { content: string; revision: number }>();
   available = true;
 
   constructor(
@@ -88,6 +89,34 @@ export class FakeCmuxClient implements CmuxClient {
     if (!surface) throw new Error(`surface not found: ${surfaceId}`);
     const { snapshot } = this.snapshots.update(surfaceId, surface.content, this.now());
     return snapshot;
+  }
+
+  /** 把假内容按行摊成网格，每行一段，够测试链路用。 */
+  async readGrid(surfaceId: string): Promise<SurfaceGrid> {
+    const surface = this.findSurface(surfaceId);
+    if (!surface) throw new Error(`surface not found: ${surfaceId}`);
+    const lines = surface.content.split("\n");
+    const spans: GridSpan[] = lines.map((line, row) => [row, 0, line.startsWith(">") ? 1 : 0, line, line.length]);
+    // 和真实实现一样：内容没变 revision 就不动，否则「没变化不推送」的逻辑没法验证
+    const last = this.gridRevisions.get(surfaceId);
+    const revision =
+      last && last.content === surface.content ? last.revision : (last?.revision ?? 0) + 1;
+    this.gridRevisions.set(surfaceId, { content: surface.content, revision });
+    return {
+      surfaceId,
+      columns: Math.max(20, ...lines.map((line) => line.length)),
+      viewportRows: lines.length,
+      scrollbackRows: 0,
+      historyRows: 0,
+      altScreen: false,
+      foreground: "#d8dee9",
+      background: "#0d1014",
+      cursor: { row: Math.max(0, lines.length - 1), column: 0, visible: true },
+      styles: [{}, { f: "#a3be8c" }],
+      spans,
+      revision,
+      fetchedAt: this.now(),
+    };
   }
 
   async sendText(surfaceId: string, text: string): Promise<void> {

@@ -162,7 +162,8 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 | `GET` | `/api/agents/:surfaceId` | Agent 详情 + 输出快照（并标记已读） |
 | `POST` | `/api/agents/:surfaceId/read` | 显式标记已读 |
 | `GET` | `/api/tree` | cmux 完整结构 |
-| `GET` | `/api/surfaces/:surfaceId/output` | 读取输出 |
+| `GET` | `/api/surfaces/:surfaceId/output` | 读取输出（纯文本） |
+| `GET` | `/api/surfaces/:surfaceId/grid` | 读取彩色渲染网格 |
 | `POST` | `/api/surfaces/:surfaceId/input` | `{ text, submit }` 输入内容 |
 | `POST` | `/api/surfaces/:surfaceId/key` | `{ key, confirm }` 发送按键 |
 | `POST` | `/api/hooks/:agent` | Hook 上报（独立 Hook 密钥，仅限本机回环） |
@@ -170,6 +171,34 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 
 允许的按键：`enter` `escape` `tab` `up` `down` `left` `right` `ctrl+c`。
 按键条在手机上是单行横滑的。不提供 `ctrl+d`：实测对着 shell 发 EOF 会直接把 surface 关掉。
+
+### 终端画面怎么还原的
+
+`cmux read-screen` 的定义是 "as **plain text**" —— 颜色、粗体、反显、光标、以及
+「每个字符占几格」在那一层就没了，所以纯文本永远补不回 TUI 的样子（中文占 2 格，
+浏览器 fallback 字体未必正好 2 倍宽，逐行累积就把边框冲断了）。
+
+会话页改成读 `cmux rpc terminal.replay`（`cmux.render-grid.v1`）：
+
+| 字段 | 用途 |
+|------|------|
+| `row_spans[].cell_width` | 终端真实格子数，前端按它定位，不依赖字体度量 |
+| `styles[]` | 已解析成 `#rrggbb` 的前景 / 背景 + 粗体 / 淡色 / 斜体 / 下划线 / 反显 / 删除线 |
+| `cursor` | 光标行列与可见性 |
+| `active_screen` | primary / alternate，用来区分全屏 TUI |
+| `scrollback_spans` | 视口之上的回滚（cmux 固定给最近 240 行） |
+
+服务端会做紧凑化（样式抽表、span 用数组元组、丢掉无意义的空白段），111×62 的一屏
+从 69 KB 压到 20 KB，加上 gzip 实测 **约 5 KB/帧**；内容指纹没变则完全不推送。
+
+**宽度自适应**：cmux 不允许第三方客户端改终端列数（`terminal.viewport` 只读，
+`mobile.terminal.set_font` 只发给 cmux 自家移动端），所以在展示层适配：
+
+- 全屏 TUI → 整屏等比缩放到容器宽度，边框严格对齐
+- 普通输出 → 按容器宽度软换行，手机上正常读
+- 会话页右下角可在 `自动 / 缩放 / 换行` 之间切换，选择会记住
+
+只有**正在查看**的 surface 读网格；后台状态推断仍走便宜的纯文本。
 
 WebSocket `/ws`：
 

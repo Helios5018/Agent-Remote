@@ -117,7 +117,7 @@ describe("Poller 刷新策略（§18）", () => {
     expect(poller.intervalFor({ ...base, status: "CLOSED" }, false)).toBeNull();
   });
 
-  it("内容没变化时不向浏览器推送", async () => {
+  it("内容没变化时不向浏览器推送（正在查看的 surface 推彩色网格）", async () => {
     const client = new FakeCmuxClient();
     const engine = new StateEngine();
     const hub = new RealtimeHub();
@@ -129,16 +129,39 @@ describe("Poller 刷新策略（§18）", () => {
     hub.handleMessage(viewer.id, JSON.stringify({ type: "subscribe", surfaceId: "sf-11" }));
 
     await poller.tick();
-    const first = sink.messages.filter((m) => m.type === "surface.snapshot").length;
-    expect(first).toBe(1);
+    const grids = () => sink.messages.filter((m) => m.type === "surface.grid");
+    expect(grids()).toHaveLength(1);
+    // 纯文本快照只发给「没在看」的场景，正在查看时不再发
+    expect(sink.messages.filter((m) => m.type === "surface.snapshot")).toHaveLength(0);
 
     await poller.tick();
-    expect(sink.messages.filter((m) => m.type === "surface.snapshot")).toHaveLength(first);
+    expect(grids()).toHaveLength(1);
 
     client.appendOutput("sf-11", "新的一行输出");
     poller.scheduleImmediate("sf-11");
     await poller.tick();
-    expect(sink.messages.filter((m) => m.type === "surface.snapshot").length).toBe(first + 1);
+    expect(grids()).toHaveLength(2);
+  });
+
+  it("网格带着颜色和格子宽度一起送到浏览器", async () => {
+    const client = new FakeCmuxClient();
+    const engine = new StateEngine();
+    const hub = new RealtimeHub();
+    const poller = new Poller({ client, engine, hub });
+
+    engine.syncTree(await client.getTree());
+    const sink = collector();
+    const viewer = hub.add(sink.send);
+    hub.handleMessage(viewer.id, JSON.stringify({ type: "subscribe", surfaceId: "sf-11" }));
+    await poller.tick();
+
+    const message = sink.messages.find((m) => m.type === "surface.grid");
+    expect(message).toBeDefined();
+    if (message?.type !== "surface.grid") throw new Error("类型不对");
+    expect(message.grid.styles.length).toBeGreaterThan(0);
+    expect(message.grid.spans.length).toBeGreaterThan(0);
+    // 每段都必须带「占几格」，前端靠它对齐
+    for (const span of message.grid.spans) expect(typeof span[4]).toBe("number");
   });
 
   it("cmux 读取失败只上报错误，不打断循环", async () => {
@@ -155,6 +178,9 @@ describe("Poller 刷新策略（§18）", () => {
       sendKey: (id: string, key: "enter") => client.sendKey(id, key),
       readSurface: async () => {
         throw new Error("read-screen timeout");
+      },
+      readGrid: async () => {
+        throw new Error("terminal.replay timeout");
       },
     };
     const poller = new Poller({ client: flaky, engine, hub, onError });

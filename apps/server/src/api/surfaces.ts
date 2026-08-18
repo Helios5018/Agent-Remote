@@ -26,6 +26,18 @@ export function createSurfaceRoutes(ctx: AppContext) {
     }
   });
 
+  /** 彩色渲染网格：颜色、粗体、反显、光标、格子宽度都在这里。 */
+  app.get("/:surfaceId/grid", async (c) => {
+    const surfaceId = c.req.param("surfaceId");
+    try {
+      const grid = await ctx.client.readGrid(surfaceId);
+      ctx.engine.applyOutput(surfaceId, false, grid.revision);
+      return c.json(grid);
+    } catch (error) {
+      return handleCmuxError(c, error);
+    }
+  });
+
   app.post("/:surfaceId/input", requireControl(ctx), async (c) => {
     const surfaceId = c.req.param("surfaceId");
     const parsed = SurfaceInputRequestSchema.safeParse(await safeJson(c.req.raw));

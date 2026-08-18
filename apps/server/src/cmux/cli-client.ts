@@ -1,14 +1,16 @@
-import type { CmuxKey, CmuxTree, SurfaceSnapshot } from "@car/protocol";
+import type { CmuxKey, CmuxTree, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
 import { createSingleFlight, TtlCache } from "@car/shared";
 import { CmuxError, type CmuxClient, type ReadSurfaceOptions } from "./client.ts";
 import {
   buildReadScreenArgs,
+  buildReplayArgs,
   buildSendKeyArgs,
   buildSendTextArgs,
   TOP_ARGS,
   TREE_ARGS,
 } from "./control.ts";
 import { parseTopJson, parseTree } from "./discovery.ts";
+import { GridParseError, GridTracker } from "./grid.ts";
 import { parseReadScreenJson, SnapshotTracker } from "./output.ts";
 import { createCliRunner, type CommandRunner } from "./exec.ts";
 
@@ -28,6 +30,7 @@ export class CmuxCliClient implements CmuxClient {
   private readonly treeCache: TtlCache<CmuxTree>;
   private readonly treeFlight = createSingleFlight<CmuxTree>();
   readonly snapshots: SnapshotTracker;
+  readonly grids = new GridTracker();
   private readonly maxOutputLines: number;
 
   constructor(options: CmuxCliClientOptions = {}) {
@@ -96,6 +99,29 @@ export class CmuxCliClient implements CmuxClient {
       workspaceId: parsed.workspaceId,
     });
     return snapshot;
+  }
+
+  async readGrid(surfaceId: string): Promise<SurfaceGrid> {
+    const result = await this.runner(buildReplayArgs(surfaceId), { timeoutMs: 8000 });
+    if (result.code !== 0) {
+      const message = result.stderr.trim();
+      if (/not found|no such|unknown surface/i.test(message)) {
+        throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND", message);
+      }
+      throw new CmuxError(`读取渲染网格失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", message);
+    }
+    const raw = parseJson(result.stdout);
+    if (!raw) {
+      throw new CmuxError("terminal.replay 输出不是合法 JSON", "CMUX_COMMAND_FAILED", result.stdout.slice(0, 200));
+    }
+    try {
+      return this.grids.parse(raw, surfaceId, this.now());
+    } catch (error) {
+      if (error instanceof GridParseError) {
+        throw new CmuxError(error.message, "CMUX_COMMAND_FAILED");
+      }
+      throw error;
+    }
   }
 
   async sendText(surfaceId: string, text: string): Promise<void> {

@@ -31,5 +31,14 @@ export function buildReadScreenArgs(surfaceId: string, lines: number, scrollback
   return args;
 }
 
+/**
+ * 彩色渲染网格。走 RPC 而不是 read-screen：
+ * read-screen 的定义就是 "as plain text"，颜色和格子宽度在那一层已经没了。
+ */
+export function buildReplayArgs(surfaceId: string): string[] {
+  assertSurfaceTarget(surfaceId);
+  return ["rpc", "terminal.replay", JSON.stringify({ surface_id: surfaceId })];
+}
+
 export const TREE_ARGS = ["tree", "--all", "--json", "--id-format", "both"];
 export const TOP_ARGS = ["top", "--all", "--processes", "--json"];
