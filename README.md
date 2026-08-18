@@ -35,11 +35,21 @@ bun run install-hooks         # 卸载：bun run uninstall-hooks
   Local:        http://localhost:4318
   Network:      http://192.168.x.x:4318     # 仅 --lan 时
 
-  Access Token: XXXXXXXXXXXX
+  Access PIN:   9385
 ```
 
-浏览器首次访问输入这个 Token，之后换成 Session Cookie。Token 首次生成后会保存在
-`~/.cmux-agent-remote/state.db`，重启复用；`--rotate-token` 可以换一个新的并踢掉所有已登录设备。
+浏览器首次访问输入这个 4 位 PIN，之后换成 Session Cookie。PIN 首次生成后保存在
+`~/.cmux-agent-remote/state.db`，重启复用：
+
+```bash
+bun run start -- --pin 8642          # 指定 PIN（4-12 位数字）
+bun run start -- --pin-length 6      # 自动生成 6 位
+bun run start -- --rotate-pin        # 换一个新 PIN，并踢掉所有已登录设备
+bun run start -- --unlock            # 自己输错被锁了，解锁
+```
+
+短 PIN 能用的前提是登录限流（连续输错会指数级锁定，见下面「安全」一节）。
+**要挂公网先读 [docs/公网暴露指南.md](docs/公网暴露指南.md)。**
 
 没有 cmux 的环境可以用 `bun run start -- --demo` 跑内置假数据。
 
@@ -130,7 +140,7 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/auth/login` | Token 换 Session Cookie |
+| `POST` | `/api/auth/login` | PIN 换 Session Cookie（带限流） |
 | `GET` | `/api/auth/session` | 当前登录态与控制模式 |
 | `POST` | `/api/auth/control` | 开启 / 关闭控制模式 |
 | `GET` | `/api/agents` | Attention Inbox（分组 + 汇总） |
@@ -140,7 +150,7 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 | `GET` | `/api/surfaces/:surfaceId/output` | 读取输出 |
 | `POST` | `/api/surfaces/:surfaceId/input` | `{ text, submit }` 输入内容 |
 | `POST` | `/api/surfaces/:surfaceId/key` | `{ key, confirm }` 发送按键 |
-| `POST` | `/api/hooks/:agent` | Hook 上报（共享 token，非浏览器 Session） |
+| `POST` | `/api/hooks/:agent` | Hook 上报（独立 Hook 密钥，仅限本机回环） |
 | `GET` | `/api/audit` | 最近的写操作审计 |
 
 允许的按键：`enter` `escape` `tab` `up` `down` `ctrl+c`。
@@ -164,7 +174,12 @@ WebSocket `/ws`：
 
 这个系统本质上拥有远程控制终端的能力，所以第一版就做了：
 
-- **Access Token**：首次访问输入，之后换 HttpOnly Session Cookie。
+- **Access PIN + 登录限流**：首次访问输入 4 位 PIN，之后换 HttpOnly Session Cookie。
+  4 位本身很弱，靠指数级锁定兜底：前 5 次失败免费，之后锁 60s 并逐次翻倍（上限 1 小时），
+  失败计数要 6 小时无新失败才清零，另有跨来源全局闸门防 IP 轮换 —— 每天最多约 24 次尝试。
+  触发锁定时服务端终端打印告警，`--unlock` 可手动解锁。
+- **两把钥匙分开**：人用的是短 PIN，Hook 用的是长随机密钥，且 Hook 接口**只接受本机回环**
+  请求（带 `X-Forwarded-For` 的一律拒绝）—— PIN 短不会连累 Hook 接口。
 - **默认只读**：写操作必须显式开启 Control Mode，15 分钟无操作自动回到只读；重启后一律回到只读。
 - **所有写操作必须指定 surface**：不存在 "send to current terminal"，服务端强制校验。
 - **危险操作二次确认**：`Ctrl+C` 未带 `confirm` 返回 `428`。
@@ -172,8 +187,11 @@ WebSocket `/ws`：
 - **不保存终端内容**：SQLite 只存状态 / 时间 / Session / 未读 / 配置 / 审计；
   审计只记录 `len=… submit=…`，不落 prompt 原文。
 - **Hook 失效不影响 Agent**：Hook 接口永远返回 200，hook 脚本任何情况下 exit 0 且 stdout 为空。
+- **代理头默认不信任**：只有显式 `--trust-proxy` 才读 `X-Forwarded-For` / `X-Forwarded-Proto`，
+  否则伪造这两个头就能绕开限流。
 
 默认只监听 `127.0.0.1`，`--lan` 才对局域网开放。
+公网暴露（Tailscale / Cloudflare Tunnel / ngrok）请按 [docs/公网暴露指南.md](docs/公网暴露指南.md) 来。
 
 ---
 
@@ -214,7 +232,7 @@ Hook 与 surface 的关联顺序：`CMUX_SURFACE_ID` → pid 反查 cmux 进程�
 ## 开发
 
 ```bash
-bun run test          # Vitest，165 个用例
+bun run test          # Vitest，193 个用例
 bun run typecheck     # tsc --noEmit
 bun run dev           # 服务端（watch）
 bun run dev:web       # 前端 dev server（:4319，代理到 :4318）

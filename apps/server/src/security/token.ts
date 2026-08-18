@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 
 /**
  * 安全设计（需求文档 §23.1 / §23.2）。
@@ -12,7 +12,28 @@ export const SESSION_COOKIE = "car_session";
 export const DEFAULT_CONTROL_TTL_MS = 15 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** 生成人可抄写的 token（去掉容易混淆的字符）。 */
+/** PIN 允许的长度范围：4 位够短到能记住，靠限流兜底；更长更安全。 */
+export const MIN_PIN_LENGTH = 4;
+export const MAX_PIN_LENGTH = 12;
+
+/**
+ * 生成纯数字 PIN。
+ *
+ * 4 位只有 1 万种组合，本身很弱 —— 它能用的前提是
+ * LoginThrottle 的指数级锁定（见 throttle.ts）。
+ */
+export function generatePin(digits = MIN_PIN_LENGTH): string {
+  const length = Math.min(MAX_PIN_LENGTH, Math.max(MIN_PIN_LENGTH, Math.floor(digits)));
+  let pin = "";
+  for (let i = 0; i < length; i += 1) pin += String(randomInt(0, 10));
+  return pin;
+}
+
+export function isValidPin(value: string): boolean {
+  return new RegExp(`^\\d{${MIN_PIN_LENGTH},${MAX_PIN_LENGTH}}$`).test(value);
+}
+
+/** 生成人可抄写的 token（去掉容易混淆的字符）；用于机器对机器的 Hook 密钥。 */
 export function generateToken(bytes = 12): string {
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   const raw = randomBytes(bytes);
@@ -136,9 +157,12 @@ export class SessionManager {
 }
 
 /**
- * Access Token 解析顺序（§23.1）：
- * 命令行 / 环境变量 > 上次保存的 > 新生成一个。
- * Token 变化时，所有旧的登录态一律作废。
+ * 凭据解析（§23.1）。
+ *
+ * 系统里有两把钥匙，故意分开：
+ *   - Access PIN：人输入的，短（默认 4 位数字），靠限流保护。
+ *   - Hook Token：机器用的，长随机串，只走本机回环，人永远不用输。
+ * 这样即使 PIN 很短，Hook 接口也不会因此变得可伪造。
  */
 export interface TokenStore {
   getSetting(key: string): string | undefined;
@@ -146,26 +170,40 @@ export interface TokenStore {
   clearSessions(): void;
 }
 
-export const ACCESS_TOKEN_SETTING = "access_token";
+export const ACCESS_PIN_SETTING = "access_pin";
+export const HOOK_TOKEN_SETTING = "hook_token";
 
-export function resolveAccessToken(
+export function resolveAccessPin(
   store: TokenStore,
-  options: { explicit?: string; rotate?: boolean } = {},
+  options: { explicit?: string; rotate?: boolean; digits?: number } = {},
 ): string {
-  const saved = store.getSetting(ACCESS_TOKEN_SETTING);
+  const saved = store.getSetting(ACCESS_PIN_SETTING);
 
   if (options.explicit) {
+    if (!isValidPin(options.explicit)) {
+      throw new Error(`PIN 必须是 ${MIN_PIN_LENGTH}-${MAX_PIN_LENGTH} 位数字`);
+    }
     if (saved !== options.explicit) {
-      store.setSetting(ACCESS_TOKEN_SETTING, options.explicit);
+      store.setSetting(ACCESS_PIN_SETTING, options.explicit);
       store.clearSessions();
     }
     return options.explicit;
   }
 
-  if (saved && !options.rotate) return saved;
+  // 老版本存的是字母 token，长度/字符集不符就当作需要重新生成。
+  if (saved && isValidPin(saved) && !options.rotate) return saved;
 
-  const generated = generateToken();
-  store.setSetting(ACCESS_TOKEN_SETTING, generated);
+  const generated = generatePin(options.digits ?? MIN_PIN_LENGTH);
+  store.setSetting(ACCESS_PIN_SETTING, generated);
   store.clearSessions();
+  return generated;
+}
+
+/** Hook 密钥：一旦生成就长期复用，除非显式轮换。 */
+export function resolveHookToken(store: TokenStore, options: { rotate?: boolean } = {}): string {
+  const saved = store.getSetting(HOOK_TOKEN_SETTING);
+  if (saved && saved.length >= 16 && !options.rotate) return saved;
+  const generated = randomBytes(24).toString("base64url");
+  store.setSetting(HOOK_TOKEN_SETTING, generated);
   return generated;
 }

@@ -599,6 +599,21 @@ body {
   cursor: pointer;
 }
 
+.pin-input {
+  text-align: center;
+  font-size: 28px;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  padding: 14px;
+}
+
+.login-note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
 .login-error {
   margin-top: 12px;
   color: var(--error);

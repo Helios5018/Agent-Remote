@@ -48,6 +48,14 @@ CREATE TABLE IF NOT EXISTS web_sessions (
   created_at   INTEGER NOT NULL,
   last_seen_at INTEGER NOT NULL
 );
+
+-- 登录失败计数与锁定；持久化是为了重启不会把攻击者的计数清零。
+CREATE TABLE IF NOT EXISTS login_throttle (
+  key             TEXT PRIMARY KEY,
+  failures        INTEGER NOT NULL,
+  last_failure_at INTEGER NOT NULL,
+  locked_until    INTEGER NOT NULL
+);
 `;
 
 export interface PersistedAgent {
@@ -205,6 +213,33 @@ export class StateStore {
   /** Token 变了就把旧 Session 全部作废。 */
   clearSessions(): void {
     this.db.run(`DELETE FROM web_sessions`);
+  }
+
+  /** 登录限流状态。 */
+  saveThrottle(entry: { key: string; failures: number; lastFailureAt: number; lockedUntil: number }): void {
+    this.db.run(
+      `INSERT INTO login_throttle (key, failures, last_failure_at, locked_until) VALUES (?,?,?,?)
+       ON CONFLICT(key) DO UPDATE SET
+         failures = excluded.failures,
+         last_failure_at = excluded.last_failure_at,
+         locked_until = excluded.locked_until`,
+      [entry.key, entry.failures, entry.lastFailureAt, entry.lockedUntil],
+    );
+  }
+
+  loadThrottle(): Array<{ key: string; failures: number; lastFailureAt: number; lockedUntil: number }> {
+    return this.db
+      .all<Record<string, unknown>>(`SELECT key, failures, last_failure_at, locked_until FROM login_throttle`)
+      .map((row) => ({
+        key: String(row["key"]),
+        failures: Number(row["failures"]),
+        lastFailureAt: Number(row["last_failure_at"]),
+        lockedUntil: Number(row["locked_until"]),
+      }));
+  }
+
+  deleteThrottle(key: string): void {
+    this.db.run(`DELETE FROM login_throttle WHERE key = ?`, [key]);
   }
 
   getSetting(key: string): string | undefined {

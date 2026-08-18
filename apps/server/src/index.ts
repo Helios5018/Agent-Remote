@@ -11,14 +11,15 @@ import type { AppContext } from "./context.ts";
 import { RealtimeHub } from "./realtime/hub.ts";
 import { Poller } from "./realtime/poller.ts";
 import { authenticateUpgrade, createWebSocketHandlers } from "./realtime/websocket.ts";
-import { resolveAccessToken, SessionManager } from "./security/token.ts";
+import { resolveAccessPin, resolveHookToken, SessionManager } from "./security/token.ts";
+import { LoginThrottle } from "./security/throttle.ts";
 import { StateEngine } from "./state/engine.ts";
 import { StateStore } from "./state/store.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 async function main(): Promise<void> {
-  const { config, help, tokenProvided, rotateToken } = parseArgs(process.argv.slice(2));
+  const { config, help, pinProvided, rotatePin, rotateHookToken, unlock } = parseArgs(process.argv.slice(2));
   if (help) {
     console.log(HELP_TEXT);
     return;
@@ -27,7 +28,19 @@ async function main(): Promise<void> {
   mkdirSync(config.dataDir, { recursive: true });
 
   const store = await StateStore.open(config.dbPath);
-  config.token = resolveAccessToken(store, { explicit: tokenProvided ? config.token : "", rotate: rotateToken });
+  try {
+    config.pin = resolveAccessPin(store, {
+      explicit: pinProvided ? config.pin : "",
+      rotate: rotatePin,
+      digits: config.pinLength,
+    });
+  } catch (error) {
+    console.error(`启动失败：${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+    return;
+  }
+  // Hook 密钥与人用的 PIN 完全分开：PIN 短，Hook 密钥长。
+  config.hookToken = resolveHookToken(store, { rotate: rotateHookToken });
   const client: CmuxClient = config.demo ? new FakeCmuxClient() : new CmuxCliClient({ maxOutputLines: config.maxOutputLines });
 
   const hub = new RealtimeHub();
@@ -36,8 +49,24 @@ async function main(): Promise<void> {
     stale: { staleAfterMs: config.staleAfterMs },
     onChange: (state) => hub.broadcastStatus(state),
   });
+  const throttle = new LoginThrottle({
+    persistence: {
+      load: () => store.loadThrottle(),
+      save: (entry) => store.saveThrottle(entry),
+      remove: (key) => store.deleteThrottle(key),
+    },
+    onLock: (entry, scope) => {
+      const seconds = Math.ceil((entry.lockedUntil - Date.now()) / 1000);
+      console.warn(
+        `[security] 连续 ${entry.failures} 次 PIN 输错（${scope === "global" ? "全局" : entry.key}），` +
+          `已锁定 ${seconds}s。若是你自己输错，可用 --unlock 启动来解锁。`,
+      );
+    },
+  });
+  if (unlock) throttle.unlock();
+
   const sessions = new SessionManager({
-    token: config.token,
+    token: config.pin,
     controlTtlMs: config.controlTtlMs,
     // 重启后手机端不用重新输 Token；控制模式不持久化，一律回到只读。
     persistence: {
@@ -53,6 +82,7 @@ async function main(): Promise<void> {
     engine,
     store,
     sessions,
+    throttle,
     hub,
     now: Date.now,
   };
@@ -89,20 +119,23 @@ async function main(): Promise<void> {
     fetch: async (request: Request, srv: BunServer) => {
       const url = new URL(request.url);
 
+      const ip = srv.requestIP(request)?.address;
+
       if (url.pathname === "/ws") {
-        const session = authenticateUpgrade(ctx, request);
+        const session = authenticateUpgrade(ctx, request, ip);
         if (!session) return new Response("unauthorized", { status: 401 });
         if (srv.upgrade(request, { data: {} })) return undefined;
         return new Response("upgrade failed", { status: 400 });
       }
 
-      if (url.pathname.startsWith("/api/")) return app.fetch(request);
+      // 把真实来源 IP 交给 Hono，限流与「Hook 只收本机」都依赖它。
+      if (url.pathname.startsWith("/api/")) return app.fetch(request, { ip });
 
       if (staticDir) {
         const response = await serveStatic(staticDir, url.pathname);
         if (response) return response;
       }
-      return app.fetch(request);
+      return app.fetch(request, { ip });
     },
   });
 
@@ -125,6 +158,7 @@ async function main(): Promise<void> {
 interface BunServer {
   port: number;
   upgrade(request: Request, options?: { data?: unknown }): boolean;
+  requestIP(request: Request): { address: string } | null;
   stop(closeActive?: boolean): void;
 }
 
@@ -170,7 +204,7 @@ function writeHookConfig(config: ServerConfig): void {
   const target = join(config.dataDir, "hook.json");
   const payload = {
     endpoint: `http://127.0.0.1:${config.port}/api/hooks`,
-    token: config.token,
+    token: config.hookToken,
     updatedAt: Date.now(),
   };
   try {
@@ -201,8 +235,15 @@ function printBanner(config: ServerConfig, port: number): void {
     const lan = lanAddress();
     if (lan) lines.push(`  Network:      http://${lan}:${port}`);
   }
-  lines.push("", `  Access Token: ${config.token}`, "");
+  lines.push("", `  Access PIN:   ${config.pin}`, "");
   if (config.demo) lines.push("  模式:         DEMO（使用内置假数据）", "");
+  if (config.host !== "127.0.0.1" && config.host !== "localhost") {
+    lines.push(
+      `  ⚠ 正在对外监听 ${config.host}。${config.pin.length <= 4 ? "4 位 PIN 依赖登录限流保护，" : ""}` +
+        "公网暴露请务必走 Tunnel + HTTPS，并加 --trust-proxy。",
+      "",
+    );
+  }
   console.log(lines.join("\n"));
 }
 

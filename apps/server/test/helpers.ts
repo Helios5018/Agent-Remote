@@ -4,10 +4,12 @@ import { FakeCmuxClient } from "../src/cmux/fake-client.ts";
 import type { AppContext } from "../src/context.ts";
 import { RealtimeHub } from "../src/realtime/hub.ts";
 import { SessionManager } from "../src/security/token.ts";
+import { LoginThrottle } from "../src/security/throttle.ts";
 import { StateEngine } from "../src/state/engine.ts";
 import { StateStore } from "../src/state/store.ts";
 
-export const TEST_TOKEN = "TESTTOKEN1234";
+export const TEST_PIN = "4271";
+export const TEST_HOOK_TOKEN = "hook-secret-for-tests-0123456789";
 
 export interface TestHarness {
   ctx: AppContext;
@@ -16,11 +18,11 @@ export interface TestHarness {
   engine: StateEngine;
   store: StateStore;
   clock: { value: number; advance(ms: number): void };
-  request(path: string, init?: RequestInit & { cookie?: string }): Promise<Response>;
+  request(path: string, init?: RequestInit & { cookie?: string; ip?: string }): Promise<Response>;
   loginCookie(): Promise<string>;
 }
 
-export async function createHarness(options: { token?: string } = {}): Promise<TestHarness> {
+export async function createHarness(options: { pin?: string; trustProxy?: boolean } = {}): Promise<TestHarness> {
   const clock = {
     value: 1_700_000_000_000,
     advance(ms: number) {
@@ -32,7 +34,10 @@ export async function createHarness(options: { token?: string } = {}): Promise<T
   const config: ServerConfig = {
     host: "127.0.0.1",
     port: 4318,
-    token: options.token ?? TEST_TOKEN,
+    pin: options.pin ?? TEST_PIN,
+    hookToken: TEST_HOOK_TOKEN,
+    pinLength: 4,
+    trustProxy: options.trustProxy ?? false,
     dataDir: "/tmp/car-test",
     dbPath: ":memory:",
     staticDir: "",
@@ -47,9 +52,10 @@ export async function createHarness(options: { token?: string } = {}): Promise<T
   const store = await StateStore.open(":memory:");
   const hub = new RealtimeHub({ now });
   const engine = new StateEngine({ now, store, onChange: (state) => hub.broadcastStatus(state) });
-  const sessions = new SessionManager({ token: config.token, controlTtlMs: config.controlTtlMs, now });
+  const sessions = new SessionManager({ token: config.pin, controlTtlMs: config.controlTtlMs, now });
+  const throttle = new LoginThrottle({ now });
 
-  const ctx: AppContext = { config, client, engine, store, sessions, hub, now };
+  const ctx: AppContext = { config, client, engine, store, sessions, throttle, hub, now };
   const app = createApp(ctx);
 
   // 先同步一次拓扑，让 Agent 列表就绪
@@ -63,16 +69,17 @@ export async function createHarness(options: { token?: string } = {}): Promise<T
     store,
     clock,
     async request(path, init = {}) {
-      const { cookie, ...rest } = init;
+      const { cookie, ip, ...rest } = init;
       const headers = new Headers(rest.headers);
       if (cookie) headers.set("cookie", cookie);
       if (rest.body && !headers.has("content-type")) headers.set("content-type", "application/json");
-      return app.request(`http://localhost${path}`, { ...rest, headers });
+      // 第三个参数就是 Bun 传给 Hono 的 env，里面带真实来源 IP
+      return app.request(`http://localhost${path}`, { ...rest, headers }, { ip });
     },
     async loginCookie() {
       const response = await harness.request("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ token: config.token }),
+        body: JSON.stringify({ token: config.pin }),
       });
       const setCookie = response.headers.get("set-cookie") ?? "";
       return setCookie.split(";")[0] ?? "";

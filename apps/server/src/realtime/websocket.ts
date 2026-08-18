@@ -23,14 +23,27 @@ export function parseCookie(header: string | null, name: string): string | undef
   return undefined;
 }
 
-export function authenticateUpgrade(ctx: AppContext, request: Request) {
+export function authenticateUpgrade(ctx: AppContext, request: Request, ip?: string) {
   const cookie = parseCookie(request.headers.get("cookie"), SESSION_COOKIE);
   const session = ctx.sessions.get(cookie);
   if (session) return session;
-  // 兼容手动带 token 的客户端（例如脚本或 PWA 首次连接）。
+
+  // 兼容手动带 PIN 的客户端（例如脚本）。这条路同样要过限流，
+  // 否则攻击者可以用 WebSocket 握手绕开 /api/auth/login 的锁定。
   const url = new URL(request.url);
   const token = url.searchParams.get("token");
-  return token ? ctx.sessions.login(token) : null;
+  if (!token) return null;
+
+  const forwarded = ctx.config.trustProxy
+    ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    : undefined;
+  const key = forwarded ?? ip ?? "local";
+  if (!ctx.throttle.check(key).allowed) return null;
+
+  const authenticated = ctx.sessions.login(token);
+  if (authenticated) ctx.throttle.recordSuccess(key);
+  else ctx.throttle.recordFailure(key);
+  return authenticated;
 }
 
 export function createWebSocketHandlers(ctx: AppContext) {

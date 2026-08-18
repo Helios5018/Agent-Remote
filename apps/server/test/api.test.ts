@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentDetailResponse, Inbox, SessionInfo, SurfaceSnapshot } from "@car/protocol";
-import { createHarness, loginWithControl, TEST_TOKEN } from "./helpers.ts";
+import { createHarness, loginWithControl, TEST_HOOK_TOKEN, TEST_PIN } from "./helpers.ts";
 
 describe("安全：Access Token 与 Session", () => {
   it("未登录访问任何数据接口都是 401", async () => {
@@ -22,7 +22,7 @@ describe("安全：Access Token 与 Session", () => {
 
     const good = await harness.request("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ token: TEST_TOKEN }),
+      body: JSON.stringify({ token: TEST_PIN }),
     });
     expect(good.status).toBe(200);
     expect(good.headers.get("set-cookie")).toMatch(/car_session=/);
@@ -45,6 +45,165 @@ describe("安全：Access Token 与 Session", () => {
     const cookie = await harness.loginCookie();
     await harness.request("/api/auth/logout", { method: "POST", cookie });
     expect((await harness.request("/api/agents", { cookie })).status).toBe(401);
+  });
+});
+
+describe("安全：登录限流（4 位 PIN 的前提）", () => {
+  it("连续输错会被锁定，返回 429 + Retry-After", async () => {
+    const harness = await createHarness();
+    const attempt = () =>
+      harness.request("/api/auth/login", {
+        method: "POST",
+        ip: "203.0.113.5",
+        body: JSON.stringify({ token: "0000" }),
+      });
+
+    for (let i = 0; i < 4; i += 1) {
+      const response = await attempt();
+      expect(response.status, `第 ${i + 1} 次`).toBe(401);
+    }
+
+    const locked = await attempt();
+    expect(locked.status).toBe(429);
+    expect(locked.headers.get("retry-after")).toBeTruthy();
+    expect(await locked.json()).toMatchObject({ error: { code: "TOO_MANY_ATTEMPTS" } });
+  });
+
+  it("锁定期间即使 PIN 正确也不放行", async () => {
+    const harness = await createHarness();
+    for (let i = 0; i < 5; i += 1) {
+      await harness.request("/api/auth/login", {
+        method: "POST",
+        ip: "203.0.113.5",
+        body: JSON.stringify({ token: "0000" }),
+      });
+    }
+
+    const correct = await harness.request("/api/auth/login", {
+      method: "POST",
+      ip: "203.0.113.5",
+      body: JSON.stringify({ token: TEST_PIN }),
+    });
+    expect(correct.status).toBe(429);
+
+    // 等锁定过去就恢复
+    harness.clock.advance(61_000);
+    const retry = await harness.request("/api/auth/login", {
+      method: "POST",
+      ip: "203.0.113.5",
+      body: JSON.stringify({ token: TEST_PIN }),
+    });
+    expect(retry.status).toBe(200);
+  });
+
+  it("Bearer / x-car-token 直登同样受限流约束", async () => {
+    const harness = await createHarness();
+    for (let i = 0; i < 6; i += 1) {
+      await harness.request("/api/agents", {
+        ip: "198.51.100.9",
+        headers: { authorization: "Bearer 0000" },
+      });
+    }
+    const blocked = await harness.request("/api/agents", {
+      ip: "198.51.100.9",
+      headers: { authorization: `Bearer ${TEST_PIN}` },
+    });
+    expect(blocked.status).toBe(429);
+  });
+
+  it("成功登录会清空失败计数", async () => {
+    const harness = await createHarness();
+    for (let i = 0; i < 3; i += 1) {
+      await harness.request("/api/auth/login", {
+        method: "POST",
+        ip: "203.0.113.5",
+        body: JSON.stringify({ token: "0000" }),
+      });
+    }
+    await harness.request("/api/auth/login", {
+      method: "POST",
+      ip: "203.0.113.5",
+      body: JSON.stringify({ token: TEST_PIN }),
+    });
+
+    // 又能重新错 4 次而不被锁
+    for (let i = 0; i < 4; i += 1) {
+      const response = await harness.request("/api/auth/login", {
+        method: "POST",
+        ip: "203.0.113.5",
+        body: JSON.stringify({ token: "0000" }),
+      });
+      expect(response.status).toBe(401);
+    }
+  });
+
+  it("默认不信任 X-Forwarded-For（否则伪造头就能绕开限流）", async () => {
+    const harness = await createHarness();
+    for (let i = 0; i < 5; i += 1) {
+      await harness.request("/api/auth/login", {
+        method: "POST",
+        ip: "203.0.113.5",
+        headers: { "x-forwarded-for": `10.0.0.${i}` },
+        body: JSON.stringify({ token: "0000" }),
+      });
+    }
+    const blocked = await harness.request("/api/auth/login", {
+      method: "POST",
+      ip: "203.0.113.5",
+      headers: { "x-forwarded-for": "10.0.0.99" },
+      body: JSON.stringify({ token: "0000" }),
+    });
+    expect(blocked.status).toBe(429);
+  });
+
+  it("--trust-proxy 时按 X-Forwarded-For 分桶", async () => {
+    const harness = await createHarness({ trustProxy: true });
+    for (let i = 0; i < 5; i += 1) {
+      await harness.request("/api/auth/login", {
+        method: "POST",
+        headers: { "x-forwarded-for": "1.1.1.1" },
+        body: JSON.stringify({ token: "0000" }),
+      });
+    }
+    expect(
+      (
+        await harness.request("/api/auth/login", {
+          method: "POST",
+          headers: { "x-forwarded-for": "1.1.1.1" },
+          body: JSON.stringify({ token: "0000" }),
+        })
+      ).status,
+    ).toBe(429);
+
+    // 另一个来源还有自己的额度（但全局闸门仍在）
+    expect(
+      (
+        await harness.request("/api/auth/login", {
+          method: "POST",
+          headers: { "x-forwarded-for": "2.2.2.2" },
+          body: JSON.stringify({ token: TEST_PIN }),
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  it("HTTPS（Tunnel）下 Cookie 带 Secure", async () => {
+    const harness = await createHarness({ trustProxy: true });
+    const response = await harness.request("/api/auth/login", {
+      method: "POST",
+      headers: { "x-forwarded-proto": "https" },
+      body: JSON.stringify({ token: TEST_PIN }),
+    });
+    expect(response.headers.get("set-cookie")).toMatch(/Secure/i);
+  });
+
+  it("本机 HTTP 下不加 Secure，否则 Cookie 根本存不下", async () => {
+    const harness = await createHarness();
+    const response = await harness.request("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ token: TEST_PIN }),
+    });
+    expect(response.headers.get("set-cookie")).not.toMatch(/Secure/i);
   });
 });
 
@@ -252,7 +411,7 @@ describe("API：Hook 接收（§10 / §33）", () => {
 
     const response = await harness.request("/api/hooks/codex", {
       method: "POST",
-      headers: { "x-car-token": TEST_TOKEN },
+      headers: { "x-car-token": TEST_HOOK_TOKEN },
       body: JSON.stringify({
         event: "UserPromptSubmit",
         payload: { session_id: "sess-1" },
@@ -277,7 +436,7 @@ describe("API：Hook 接收（§10 / §33）", () => {
     for (const testCase of cases) {
       const response = await harness.request(`/api/hooks/${testCase.agent}`, {
         method: "POST",
-        headers: { "x-car-token": TEST_TOKEN },
+        headers: { "x-car-token": TEST_HOOK_TOKEN },
         body: JSON.stringify({
           event: testCase.event,
           payload: testCase.payload,
@@ -292,10 +451,10 @@ describe("API：Hook 接收（§10 / §33）", () => {
     const harness = await createHarness();
     const cases = [
       { path: "/api/hooks/codex", headers: { "x-car-token": "WRONG" }, body: JSON.stringify({ event: "Stop" }) },
-      { path: "/api/hooks/unknown-agent", headers: { "x-car-token": TEST_TOKEN }, body: JSON.stringify({ event: "Stop" }) },
-      { path: "/api/hooks/codex", headers: { "x-car-token": TEST_TOKEN }, body: "not json" },
-      { path: "/api/hooks/codex", headers: { "x-car-token": TEST_TOKEN }, body: JSON.stringify({ event: "WhoKnows", context: { surfaceId: "sf-11" } }) },
-      { path: "/api/hooks/codex", headers: { "x-car-token": TEST_TOKEN }, body: JSON.stringify({ event: "Stop", context: { surfaceId: "unknown-surface" } }) },
+      { path: "/api/hooks/unknown-agent", headers: { "x-car-token": TEST_HOOK_TOKEN }, body: JSON.stringify({ event: "Stop" }) },
+      { path: "/api/hooks/codex", headers: { "x-car-token": TEST_HOOK_TOKEN }, body: "not json" },
+      { path: "/api/hooks/codex", headers: { "x-car-token": TEST_HOOK_TOKEN }, body: JSON.stringify({ event: "WhoKnows", context: { surfaceId: "sf-11" } }) },
+      { path: "/api/hooks/codex", headers: { "x-car-token": TEST_HOOK_TOKEN }, body: JSON.stringify({ event: "Stop", context: { surfaceId: "unknown-surface" } }) },
     ];
 
     for (const testCase of cases) {
@@ -308,11 +467,54 @@ describe("API：Hook 接收（§10 / §33）", () => {
     }
   });
 
+  it("Hook 密钥和人用的 PIN 是两把钥匙：拿 PIN 打 Hook 无效", async () => {
+    const harness = await createHarness();
+    const response = await harness.request("/api/hooks/codex", {
+      method: "POST",
+      headers: { "x-car-token": TEST_PIN },
+      body: JSON.stringify({ event: "Stop", context: { surfaceId: "sf-11" } }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: false });
+    expect(harness.engine.get("sf-11")?.status).toBe("IDLE");
+  });
+
+  it("Hook 只接受本机回环，公网打进来一律忽略", async () => {
+    const harness = await createHarness();
+
+    const remote = await harness.request("/api/hooks/codex", {
+      method: "POST",
+      ip: "203.0.113.9",
+      headers: { "x-car-token": TEST_HOOK_TOKEN },
+      body: JSON.stringify({ event: "Stop", context: { surfaceId: "sf-11" } }),
+    });
+    expect(remote.status).toBe(200);
+    expect(await remote.json()).toMatchObject({ ok: false, ignored: "remote origin" });
+
+    // 经过 Tunnel（带 X-Forwarded-For）也算远程
+    const viaTunnel = await harness.request("/api/hooks/codex", {
+      method: "POST",
+      ip: "127.0.0.1",
+      headers: { "x-car-token": TEST_HOOK_TOKEN, "x-forwarded-for": "203.0.113.9" },
+      body: JSON.stringify({ event: "Stop", context: { surfaceId: "sf-11" } }),
+    });
+    expect(await viaTunnel.json()).toMatchObject({ ok: false, ignored: "remote origin" });
+
+    // 本机直连正常
+    const local = await harness.request("/api/hooks/codex", {
+      method: "POST",
+      ip: "127.0.0.1",
+      headers: { "x-car-token": TEST_HOOK_TOKEN },
+      body: JSON.stringify({ event: "Stop", context: { surfaceId: "sf-11" } }),
+    });
+    expect(await local.json()).toMatchObject({ ok: true, applied: true });
+  });
+
   it("hook 不需要浏览器 Session（Agent 进程直连）", async () => {
     const harness = await createHarness();
     const response = await harness.request("/api/hooks/codex", {
       method: "POST",
-      headers: { "x-car-token": TEST_TOKEN },
+      headers: { "x-car-token": TEST_HOOK_TOKEN },
       body: JSON.stringify({ event: "Stop", context: { surfaceId: "sf-11" } }),
     });
     expect(response.status).toBe(200);
@@ -327,7 +529,7 @@ describe("实时推送与 API 的联动", () => {
 
     await harness.request("/api/hooks/codex", {
       method: "POST",
-      headers: { "x-car-token": TEST_TOKEN },
+      headers: { "x-car-token": TEST_HOOK_TOKEN },
       body: JSON.stringify({ event: "PermissionRequest", context: { surfaceId: "sf-11" } }),
     });
 

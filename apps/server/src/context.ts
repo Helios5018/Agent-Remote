@@ -2,6 +2,7 @@ import type { CmuxClient } from "./cmux/client.ts";
 import type { Poller } from "./realtime/poller.ts";
 import type { RealtimeHub } from "./realtime/hub.ts";
 import type { SessionManager } from "./security/token.ts";
+import type { LoginThrottle } from "./security/throttle.ts";
 import type { StateEngine } from "./state/engine.ts";
 import type { StateStore } from "./state/store.ts";
 import type { ServerConfig } from "./config.ts";
@@ -13,6 +14,8 @@ export interface AppContext {
   engine: StateEngine;
   store: StateStore;
   sessions: SessionManager;
+  /** 登录限流：短 PIN 能在公网用，全靠它。 */
+  throttle: LoginThrottle;
   hub: RealtimeHub;
   poller?: Poller;
   now: () => number;
@@ -24,6 +27,7 @@ export type ApiErrorCode =
   | "BAD_REQUEST"
   | "NOT_FOUND"
   | "CONFIRM_REQUIRED"
+  | "TOO_MANY_ATTEMPTS"
   | "CMUX_UNAVAILABLE"
   | "INTERNAL";
 
