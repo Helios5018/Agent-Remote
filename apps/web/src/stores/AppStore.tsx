@@ -8,7 +8,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { AgentState, CmuxKey, Inbox, ServerMessage, SessionInfo } from "@car/protocol";
+import type {
+  AgentState,
+  CmuxKey,
+  CmuxSurface,
+  CmuxTree,
+  CmuxWorkspace,
+  Inbox,
+  ServerMessage,
+  SessionInfo,
+} from "@car/protocol";
 import { api, ApiError } from "../api.ts";
 import { useRealtime, type ConnectionState } from "../hooks/useRealtime.ts";
 
@@ -21,6 +30,8 @@ interface AppStoreValue {
   session: SessionInfo | null;
   loading: boolean;
   inbox: Inbox | null;
+  /** cmux 真实结构：Workspace → Pane → Surface，首页直接按它渲染。 */
+  tree: CmuxTree | null;
   connection: ConnectionState;
   error: string | null;
   contents: Record<string, SurfaceContent>;
@@ -29,6 +40,7 @@ interface AppStoreValue {
   logout(): Promise<void>;
   setControlMode(enabled: boolean): Promise<void>;
   refreshInbox(): Promise<void>;
+  refreshTree(): Promise<void>;
   openSession(surfaceId: string): Promise<AgentState | null>;
   subscribe(surfaceId: string | null): void;
   sendInput(surfaceId: string, text: string, submit: boolean): Promise<void>;
@@ -43,6 +55,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [inbox, setInbox] = useState<Inbox | null>(null);
+  const [tree, setTree] = useState<CmuxTree | null>(null);
   const [contents, setContents] = useState<Record<string, SurfaceContent>>({});
   const [error, setError] = useState<string | null>(null);
   const authenticated = session?.authenticated === true;
@@ -91,6 +104,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     if (result) setInbox(result);
   }, [withError]);
 
+  const refreshTree = useCallback(async () => {
+    const result = await withError(() => api.tree());
+    if (result) setTree(result);
+  }, [withError]);
+
+  const refreshOutput = useCallback(
+    async (surfaceId: string) => {
+      const snapshot = await withError(() => api.output(surfaceId));
+      if (snapshot) {
+        setContents((current) => ({
+          ...current,
+          [surfaceId]: { content: snapshot.content, revision: snapshot.revision },
+        }));
+      }
+    },
+    [withError],
+  );
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -124,6 +155,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       session,
       loading,
       inbox,
+      tree,
       connection,
       error,
       contents,
@@ -137,6 +169,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         const info = await withError(() => api.logout());
         if (info) setSession(info);
         setInbox(null);
+        setTree(null);
       },
 
       async setControlMode(enabled: boolean) {
@@ -145,10 +178,26 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       },
 
       refreshInbox,
+      refreshTree,
 
       async openSession(surfaceId: string) {
-        const detail = await withError(() => api.agent(surfaceId));
-        if (!detail) return null;
+        // 非 Agent 的 surface（shell / browser）没有 Agent 状态，
+        // 但仍然允许只读查看，所以 404 不算错误，直接退化成读输出。
+        let detail: Awaited<ReturnType<typeof api.agent>> | null = null;
+        try {
+          detail = await api.agent(surfaceId);
+          setError(null);
+        } catch (caught) {
+          if (caught instanceof ApiError && caught.status === 404) {
+            await refreshOutput(surfaceId);
+            return null;
+          }
+          if (caught instanceof ApiError && caught.status === 401) {
+            setSession((s) => (s ? { ...s, authenticated: false } : null));
+          }
+          setError(caught instanceof Error ? caught.message : String(caught));
+          return null;
+        }
         if (detail.snapshot) {
           setContents((current) => ({
             ...current,
@@ -169,19 +218,24 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         await withError(() => api.sendKey(surfaceId, key, confirm));
       },
 
-      async refreshOutput(surfaceId: string) {
-        const snapshot = await withError(() => api.output(surfaceId));
-        if (snapshot) {
-          setContents((current) => ({
-            ...current,
-            [surfaceId]: { content: snapshot.content, revision: snapshot.revision },
-          }));
-        }
-      },
+      refreshOutput,
 
       clearError: () => setError(null),
     }),
-    [session, loading, inbox, connection, error, contents, refreshInbox, subscribe, withError],
+    [
+      session,
+      loading,
+      inbox,
+      tree,
+      connection,
+      error,
+      contents,
+      refreshInbox,
+      refreshTree,
+      refreshOutput,
+      subscribe,
+      withError,
+    ],
   );
 
   return <AppStoreContext.Provider value={value}>{children}</AppStoreContext.Provider>;
@@ -216,4 +270,28 @@ export function findAgent(inbox: Inbox | null, surfaceId: string): AgentState | 
     if (hit) return hit;
   }
   return undefined;
+}
+
+/** surfaceId → { surface, workspace }，用于给没有 Agent 的 surface 也标出归属。 */
+export function findSurface(
+  tree: CmuxTree | null,
+  surfaceId: string,
+): { surface: CmuxSurface; workspace: CmuxWorkspace } | undefined {
+  if (!tree) return undefined;
+  for (const workspace of tree.workspaces) {
+    for (const pane of workspace.panes) {
+      const surface = pane.surfaces.find((item) => item.id === surfaceId);
+      if (surface) return { surface, workspace };
+    }
+  }
+  return undefined;
+}
+
+/** 把 Inbox 摊平成 surfaceId → AgentState，树视图逐行查状态用。 */
+export function agentsBySurface(inbox: Inbox | null): Map<string, AgentState> {
+  const map = new Map<string, AgentState>();
+  for (const group of inbox?.groups ?? []) {
+    for (const agent of group.agents) map.set(agent.surfaceId, agent);
+  }
+  return map;
 }

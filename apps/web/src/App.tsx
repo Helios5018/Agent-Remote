@@ -1,8 +1,7 @@
 import { useRouter } from "./hooks/useRouter.ts";
-import { InboxPage } from "./pages/InboxPage.tsx";
+import { HomePage } from "./pages/HomePage.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
 import { SessionPage } from "./pages/SessionPage.tsx";
-import { WorkspacePage } from "./pages/WorkspacePage.tsx";
 import { AppStoreProvider, useAppStore } from "./stores/AppStore.tsx";
 
 function Router() {
@@ -14,11 +13,16 @@ function Router() {
 
   switch (route.name) {
     case "session":
-      return <SessionPage surfaceId={route.surfaceId} back={back} />;
+      return <SessionPage surfaceId={route.surfaceId} back={back} navigate={navigate} />;
     case "workspace":
-      return <WorkspacePage workspaceId={route.workspaceId} navigate={navigate} back={back} />;
+      // #/w/all 是旧链接，等价于首页的完整结构树。
+      return route.workspaceId === "all" ? (
+        <HomePage navigate={navigate} />
+      ) : (
+        <HomePage navigate={navigate} back={back} workspaceId={route.workspaceId} />
+      );
     default:
-      return <InboxPage navigate={navigate} />;
+      return <HomePage navigate={navigate} />;
   }
 }
 

@@ -5,29 +5,52 @@ import { formatAgo, formatDuration } from "@car/shared";
 import { Composer } from "../components/Composer.tsx";
 import { StatusBadge } from "../components/StatusBadge.tsx";
 import { ControlToggle, TopBar } from "../components/TopBar.tsx";
-import { findAgent, useAppStore } from "../stores/AppStore.tsx";
+import { findAgent, findSurface, useAppStore } from "../stores/AppStore.tsx";
+import type { Route } from "../hooks/useRouter.ts";
 
 /** Agent 会话页（需求文档 §7）：使用频率最高的页面。 */
-export function SessionPage({ surfaceId, back }: { surfaceId: string; back: () => void }) {
-  const { inbox, contents, openSession, subscribe, sendInput, sendKey, refreshOutput, session, error } =
-    useAppStore();
+export function SessionPage({
+  surfaceId,
+  back,
+  navigate,
+}: {
+  surfaceId: string;
+  back: () => void;
+  navigate: (route: Route) => void;
+}) {
+  const {
+    inbox,
+    tree,
+    contents,
+    openSession,
+    subscribe,
+    sendInput,
+    sendKey,
+    refreshOutput,
+    refreshTree,
+    session,
+    error,
+  } = useAppStore();
   const [agent, setAgent] = useState<AgentState | null>(() => findAgent(inbox, surfaceId) ?? null);
   const [now, setNow] = useState(() => Date.now());
   const outputRef = useRef<HTMLPreElement | null>(null);
   const stickToBottom = useRef(true);
 
   const liveAgent = findAgent(inbox, surfaceId) ?? agent;
+  const placement = findSurface(tree, surfaceId);
   const content = contents[surfaceId]?.content ?? "";
   const controlMode = session?.controlMode === true;
 
   // store 里的函数会随状态刷新而换引用；用 ref 固定住，
   // 否则一旦请求失败就会「失败 → 状态更新 → 重新请求」无限重试。
-  const actionsRef = useRef({ openSession, subscribe });
-  actionsRef.current = { openSession, subscribe };
+  const actionsRef = useRef({ openSession, subscribe, refreshTree });
+  actionsRef.current = { openSession, subscribe, refreshTree };
 
   useEffect(() => {
     let cancelled = false;
     actionsRef.current.subscribe(surfaceId);
+    // 直接从 #/s/:id 进来时树还没拉过，标题要靠它。
+    void actionsRef.current.refreshTree();
     void actionsRef.current.openSession(surfaceId).then((result) => {
       if (result && !cancelled) setAgent(result);
     });
@@ -56,7 +79,17 @@ export function SessionPage({ surfaceId, back }: { surfaceId: string; back: () =
     stickToBottom.current = distance < 40;
   };
 
-  const title = liveAgent?.workspaceTitle || liveAgent?.surfaceTitle || surfaceId;
+  // 主标题用 surface 名，workspace 名放到副标题里做归属说明。
+  const title = liveAgent?.surfaceTitle || placement?.surface.title || liveAgent?.surfaceRef || surfaceId;
+  const workspaceTitle = liveAgent?.workspaceTitle ?? placement?.workspace.title;
+  const workspaceId = liveAgent?.workspaceId ?? placement?.workspace.id;
+  const surfaceRef = liveAgent?.surfaceRef ?? placement?.surface.ref ?? surfaceId;
+  const kindLabel = liveAgent
+    ? AGENT_DISPLAY_NAME[liveAgent.agent]
+    : placement?.surface.type === "terminal" || !placement
+      ? "Shell"
+      : placement.surface.type;
+
   const runningFor =
     liveAgent?.status === "WORKING" && liveAgent.turnStartedAt
       ? `Running ${formatDuration(now - liveAgent.turnStartedAt)}`
@@ -66,11 +99,21 @@ export function SessionPage({ surfaceId, back }: { surfaceId: string; back: () =
 
   return (
     <div className="page session-page">
-      <TopBar title={title} subtitle={liveAgent?.surfaceRef ?? surfaceId} onBack={back} right={<ControlToggle />} />
+      <TopBar title={title} subtitle={surfaceRef} onBack={back} right={<ControlToggle />} />
 
       <div className="session-header">
-        <div className="session-agent">{liveAgent ? AGENT_DISPLAY_NAME[liveAgent.agent] : "Agent"}</div>
+        <div className="session-agent">{kindLabel}</div>
         {liveAgent ? <StatusBadge status={liveAgent.status} /> : null}
+        {workspaceTitle ? (
+          <button
+            type="button"
+            className="ws-chip ws-chip-button"
+            title="查看该 workspace 的结构"
+            onClick={() => (workspaceId ? navigate({ name: "workspace", workspaceId }) : undefined)}
+          >
+            ▤ {workspaceTitle}
+          </button>
+        ) : null}
         <div className="session-timing">{runningFor}</div>
         {liveAgent?.currentActivity ? <div className="session-activity">{liveAgent.currentActivity}</div> : null}
         {liveAgent?.status === "POSSIBLY_STALE" ? (

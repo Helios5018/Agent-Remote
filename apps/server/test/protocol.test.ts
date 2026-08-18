@@ -4,6 +4,8 @@ import {
   ALLOWED_KEYS,
   ATTENTION_PRIORITY,
   attentionGroupOf,
+  DANGEROUS_KEY_HINT,
+  DANGEROUS_KEYS,
   isDangerousKey,
   normalizeKey,
   SurfaceInputRequestSchema,
@@ -63,25 +65,49 @@ describe("统一事件（§10）", () => {
 });
 
 describe("按键白名单（§22 / §23.4）", () => {
-  it("第一版只放行六个键", () => {
-    expect([...ALLOWED_KEYS]).toEqual(["enter", "escape", "tab", "up", "down", "ctrl+c"]);
+  it("白名单里的键都是 cmux send-key 实际支持的", () => {
+    expect([...ALLOWED_KEYS]).toEqual([
+      "enter",
+      "escape",
+      "tab",
+      "up",
+      "down",
+      "left",
+      "right",
+      "ctrl+c",
+    ]);
+  });
+
+  it("Ctrl 组合键只有 Ctrl+C，Ctrl+D 会关掉 surface 所以不提供", () => {
+    expect(ALLOWED_KEYS.filter((key) => key.startsWith("ctrl+"))).toEqual(["ctrl+c"]);
+    expect(SurfaceKeyRequestSchema.safeParse({ key: "ctrl+d" }).success).toBe(false);
+    expect(normalizeKey("Ctrl-D")).toBeNull();
   });
 
   it("常见别名能归一", () => {
     expect(normalizeKey("Esc")).toBe("escape");
     expect(normalizeKey("ArrowUp")).toBe("up");
+    expect(normalizeKey("ArrowLeft")).toBe("left");
+    expect(normalizeKey("ArrowRight")).toBe("right");
     expect(normalizeKey(" Ctrl-C ")).toBe("ctrl+c");
     expect(normalizeKey("F5")).toBeNull();
   });
 
-  it("Ctrl+C 属于危险操作", () => {
+  it("只有 Ctrl+C 需要二次确认", () => {
     expect(isDangerousKey("ctrl+c")).toBe(true);
+    expect(isDangerousKey("left")).toBe(false);
     expect(isDangerousKey("enter")).toBe(false);
+  });
+
+  it("危险键都有后果说明", () => {
+    for (const key of DANGEROUS_KEYS) {
+      expect(DANGEROUS_KEY_HINT[key]).toBeTruthy();
+    }
   });
 
   it("请求体校验", () => {
     expect(SurfaceKeyRequestSchema.safeParse({ key: "enter" }).success).toBe(true);
-    expect(SurfaceKeyRequestSchema.safeParse({ key: "delete" }).success).toBe(false);
+    expect(SurfaceKeyRequestSchema.safeParse({ key: "ctrl+z" }).success).toBe(false);
     expect(SurfaceInputRequestSchema.parse({ text: "hi" }).submit).toBe(true);
     expect(SurfaceInputRequestSchema.safeParse({ text: "x".repeat(20001) }).success).toBe(false);
   });

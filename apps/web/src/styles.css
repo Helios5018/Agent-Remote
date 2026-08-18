@@ -202,10 +202,31 @@ body {
 .agent-row-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   font-size: 13px;
   color: var(--text-dim);
-  margin-top: 2px;
+  margin-top: 3px;
+}
+
+/* workspace 归属标记：主标题是 surface 名，workspace 名跟在下面 */
+.ws-chip {
+  display: inline-block;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: #0d1014;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-chip-button {
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .agent-row-activity {
@@ -276,52 +297,229 @@ body {
   color: #4b5563;
 }
 
-/* ---------- Workspace 页 ---------- */
+/* ---------- 视图切换 + 结构树工具条 ---------- */
 
-.pane-block {
-  margin-bottom: 14px;
+.view-switch {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px 0;
 }
 
-.pane-title {
-  font-size: 12px;
+.view-switch button {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: transparent;
   color: var(--text-dim);
-  margin: 6px 0 6px 4px;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.view-switch button.on {
+  background: #1c232c;
+  border-color: #37414d;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tree-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.tree-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.tree-search {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #0d1014;
+  color: var(--text);
+  padding: 7px 28px 7px 12px;
+  font: inherit;
+  /* 16px 以下 iOS 会自动放大页面 */
+  font-size: 16px;
+}
+
+.tree-search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.chip-button {
+  flex: none;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip-button.on {
+  border-color: #37414d;
+  background: #1c232c;
+  color: var(--text);
+}
+
+/* ---------- 结构树：Workspace → Pane → Surface ---------- */
+
+.ws-block {
+  margin-top: 14px;
+}
+
+.ws-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: inherit;
+  font: inherit;
+  padding: 6px 4px;
+  cursor: pointer;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+}
+
+.caret {
+  flex: none;
+  width: 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.ws-name {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-counts {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex: none;
+}
+
+.ws-ref {
+  flex: none;
+  font-size: 11px;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.chip-attention {
+  border-color: #6b4d10;
+  color: var(--attention);
+}
+
+.chip-working {
+  border-color: #1f5136;
+  color: var(--accent);
+}
+
+.chip-now {
+  border-color: #37414d;
+  color: var(--text);
+}
+
+.pane-block {
+  margin-top: 6px;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 4px 4px 8px;
+  cursor: pointer;
+}
+
+.chip-hidden {
+  opacity: 0.6;
 }
 
 .surface-row {
   display: flex;
+  align-items: center;
   gap: 10px;
   width: 100%;
   text-align: left;
   background: var(--bg-row);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 10px 12px;
-  margin-bottom: 6px;
+  padding: 9px 12px;
+  margin: 0 0 6px 12px;
+  width: calc(100% - 12px);
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
 
-.surface-row.plain {
-  opacity: 0.55;
-  cursor: default;
+.surface-row:active {
+  background: #171c22;
+}
+
+.surface-row.muted {
+  opacity: 0.62;
 }
 
 .surface-glyph {
   width: 14px;
   flex: none;
-  color: var(--accent);
+  font-size: 12px;
 }
 
 .surface-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
 }
 
 .surface-title {
-  font-size: 13px;
+  font-size: 13.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -333,6 +531,15 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.surface-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* ---------- 会话页 ---------- */
@@ -378,6 +585,8 @@ body {
 
 .output {
   flex: 1;
+  /* 不加这行，pre 的内容高度会把输入区顶出屏幕 */
+  min-height: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   margin: 0;
@@ -457,12 +666,64 @@ body {
   opacity: 0.4;
 }
 
+/* 按键条：单行横滑，两端渐隐提示还有更多键 */
+.key-bar-wrap {
+  position: relative;
+  margin-top: 8px;
+}
+
+.key-bar-wrap::before,
+.key-bar-wrap::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 1;
+}
+
+.key-bar-wrap::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-elevated), rgba(20, 24, 29, 0));
+}
+
+.key-bar-wrap::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-elevated), rgba(20, 24, 29, 0));
+}
+
+.key-bar-wrap.fade-start::before,
+.key-bar-wrap.fade-end::after {
+  opacity: 1;
+}
+
 .key-bar {
   display: flex;
+  flex-wrap: nowrap;
   gap: 6px;
-  margin-top: 8px;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
   padding-bottom: 2px;
+}
+
+.key-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* 同一组键贴在一起，组间留白代替分隔线 */
+.key-group {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.key-group + .key-group {
+  margin-left: 10px;
 }
 
 .key-button {
@@ -471,9 +732,10 @@ body {
   background: #0d1014;
   color: var(--text);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 8px 9px;
   font-size: 13px;
-  min-width: 52px;
+  /* 44px 是能稳定点中的最小尺寸，再小就别压了，让它横滑 */
+  min-width: 44px;
   cursor: pointer;
 }
 
@@ -481,6 +743,7 @@ body {
   border-color: #7f1d1d;
   color: #fca5a5;
 }
+
 
 .key-button.danger-armed {
   background: var(--error);
@@ -622,6 +885,8 @@ body {
 
 @media (min-width: 768px) {
   .scroll-area,
+  .view-switch,
+  .tree-toolbar,
   .session-header,
   .session-tools,
   .composer,

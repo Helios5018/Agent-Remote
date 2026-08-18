@@ -68,27 +68,44 @@ export const SurfaceSnapshotSchema = z.object({
 });
 export type SurfaceSnapshot = z.infer<typeof SurfaceSnapshotSchema>;
 
-/** 第一版允许的按键白名单（需求文档 §22）。 */
+/**
+ * 按键白名单（需求文档 §22）。
+ * 名字必须和 `cmux send-key` 接受的写法完全一致 —— 这里每一个都实测过，
+ * cmux 对不认识的键会直接返回 invalid_params: Unknown key。
+ */
 export const CmuxKeySchema = z.enum([
   "enter",
   "escape",
   "tab",
   "up",
   "down",
+  "left",
+  "right",
+  // Ctrl 组合键只保留中断：ctrl+d 会直接关掉 surface，其余用不上
   "ctrl+c",
 ]);
 export type CmuxKey = z.infer<typeof CmuxKeySchema>;
 
 export const ALLOWED_KEYS: readonly CmuxKey[] = CmuxKeySchema.options;
 
-/** 需要二次确认的危险操作（需求文档 §23.4）。 */
+/**
+ * 需要二次确认的危险操作（需求文档 §23.4）。
+ *
+ * 这里不放 Ctrl+D：实测对着 shell 发 EOF 会直接把 surface 关掉，
+ * 代价太大而收益很小，索性不给这个入口。
+ */
 export const DANGEROUS_KEYS: readonly CmuxKey[] = ["ctrl+c"];
 
 export function isDangerousKey(key: CmuxKey): boolean {
   return DANGEROUS_KEYS.includes(key);
 }
 
-/** 前端按钮名 → cmux CLI 键名。 */
+/** 危险按键的后果说明，确认前展示给用户。 */
+export const DANGEROUS_KEY_HINT: Partial<Record<CmuxKey, string>> = {
+  "ctrl+c": "中断当前正在运行的命令或 Agent 回合",
+};
+
+/** 前端按钮名 / 浏览器 KeyboardEvent.key → cmux CLI 键名。 */
 const KEY_ALIASES: Record<string, CmuxKey> = {
   enter: "enter",
   return: "enter",
@@ -99,6 +116,10 @@ const KEY_ALIASES: Record<string, CmuxKey> = {
   arrowup: "up",
   down: "down",
   arrowdown: "down",
+  left: "left",
+  arrowleft: "left",
+  right: "right",
+  arrowright: "right",
   "ctrl+c": "ctrl+c",
   "ctrl-c": "ctrl+c",
   ctrlc: "ctrl+c",

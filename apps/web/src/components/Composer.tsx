@@ -1,14 +1,30 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CmuxKey } from "@car/protocol";
-import { isDangerousKey } from "@car/protocol";
+import { DANGEROUS_KEY_HINT, isDangerousKey } from "@car/protocol";
 
-const KEYS: Array<{ key: CmuxKey; label: string }> = [
-  { key: "enter", label: "Enter" },
-  { key: "escape", label: "Esc" },
-  { key: "tab", label: "Tab" },
-  { key: "up", label: "↑" },
-  { key: "down", label: "↓" },
-  { key: "ctrl+c", label: "Ctrl+C" },
+interface KeyButton {
+  key: CmuxKey;
+  label: string;
+  title: string;
+}
+
+/**
+ * 按键条按用途分组，一行横向滑动。
+ * 手机屏幕放不下这么多键，分组 + 横滑比换行更像原生键盘条。
+ */
+const KEY_GROUPS: KeyButton[][] = [
+  [
+    { key: "enter", label: "Enter", title: "回车 / 确认" },
+    { key: "escape", label: "Esc", title: "取消 / 退出当前状态" },
+    { key: "tab", label: "Tab", title: "补全 / 切换" },
+  ],
+  [
+    { key: "up", label: "↑", title: "上（历史 / 选项）" },
+    { key: "down", label: "↓", title: "下（历史 / 选项）" },
+    { key: "left", label: "←", title: "左" },
+    { key: "right", label: "→", title: "右" },
+  ],
+  [{ key: "ctrl+c", label: "Ctrl+C", title: DANGEROUS_KEY_HINT["ctrl+c"] ?? "中断" }],
 ];
 
 export function Composer({
@@ -25,6 +41,23 @@ export function Composer({
   const [pendingKey, setPendingKey] = useState<CmuxKey | null>(null);
   // 中文输入法组字期间不能提交（需求文档 §26 中文输入）
   const [composing, setComposing] = useState(false);
+  const keyBarRef = useRef<HTMLDivElement | null>(null);
+  // 两端是否还有没滑到的键，用来决定要不要显示渐隐提示
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  const syncEdges = () => {
+    const element = keyBarRef.current;
+    if (!element) return;
+    const start = element.scrollLeft > 4;
+    const end = element.scrollLeft + element.clientWidth < element.scrollWidth - 4;
+    setEdges((current) => (current.start === start && current.end === end ? current : { start, end }));
+  };
+
+  useEffect(() => {
+    syncEdges();
+    window.addEventListener("resize", syncEdges);
+    return () => window.removeEventListener("resize", syncEdges);
+  }, []);
 
   const send = async (submit: boolean) => {
     if (busy || disabled) return;
@@ -85,22 +118,37 @@ export function Composer({
         </button>
       </div>
 
-      <div className="key-bar">
-        {KEYS.map(({ key, label }) => (
-          <button
-            type="button"
-            key={key}
-            className={`key-button ${pendingKey === key ? "danger-armed" : ""} ${isDangerousKey(key) ? "danger" : ""}`}
-            disabled={disabled || busy}
-            onClick={() => void pressKey(key)}
-          >
-            {pendingKey === key ? "确认?" : label}
-          </button>
-        ))}
+      <div
+        className={`key-bar-wrap ${edges.start ? "fade-start" : ""} ${edges.end ? "fade-end" : ""}`}
+      >
+        <div className="key-bar" ref={keyBarRef} onScroll={syncEdges}>
+          {KEY_GROUPS.map((group, groupIndex) => (
+            <div className="key-group" key={group[0]?.key ?? groupIndex}>
+              {group.map(({ key, label, title }) => (
+                <button
+                  type="button"
+                  key={key}
+                  title={title}
+                  className={[
+                    "key-button",
+                    isDangerousKey(key) ? "danger" : "",
+                    pendingKey === key ? "danger-armed" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  disabled={disabled || busy}
+                  onClick={() => void pressKey(key)}
+                >
+                  {pendingKey === key ? "确认?" : label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
       {pendingKey ? (
         <div className="composer-hint danger-hint">
-          再点一次「确认?」发送 {pendingKey}，或
+          {DANGEROUS_KEY_HINT[pendingKey] ?? "危险操作"}。再点一次「确认?」发送 {pendingKey}，或
           <button type="button" className="link-button" onClick={() => setPendingKey(null)}>
             取消
           </button>

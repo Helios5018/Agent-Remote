@@ -55,19 +55,34 @@ bun run start -- --unlock            # 自己输错被锁了，解锁
 
 ---
 
-## 三个页面
+## 两个页面、两个视图
 
 | 页面 | 作用 |
 |------|------|
-| **Attention Inbox**（`#/`） | 首页。先回答「哪些 Agent 现在需要我」，按注意力优先级排序 |
-| **Workspace**（`#/w/all`） | cmux 真实结构 Workspace → Pane → Surface，回答「这个 Agent 在哪个 surface」 |
+| **首页**（`#/`） | 两个视图切换：**结构** / **关注** |
 | **Agent 会话**（`#/s/:surfaceId`） | 使用频率最高：看最近输出、发 Prompt、发控制键 |
 
-首页排序：
+首页默认是**结构视图**，直接按 cmux 的真实层级渲染：
+
+```text
+Workspace ── Pane ── Surface ── Agent
+```
+
+- 点 workspace / pane 标题折叠或展开；工具条上的「全部折叠 / 全部展开」一键处理
+- 「只看 Agent ⇄ 全部 surface」切换是否显示 shell、编辑器等非 Agent 的 surface
+- 搜索框按 workspace / surface 名过滤，搜索时自动展开命中项
+- 折叠状态、筛选条件存在 localStorage，刷新和重连都不会丢
+- 折叠的 workspace 标题上仍会显示 `2 需要你` / `1 运行中` / `+3`（被隐藏的 surface 数）
+- 非 Agent 的 surface 也能点开只读查看输出
+
+**关注视图**就是 Attention Inbox，按注意力优先级排序，只回答「哪些 Agent 现在需要我」：
 
 ```text
 ERROR → NEEDS_APPROVAL → NEEDS_INPUT → RESPONDED_UNREAD → POSSIBLY_STALE → WORKING → IDLE
 ```
+
+两个视图里的标题都是 **surface 名为主、workspace 名为辅**（`▤ workspace`）—— surface 名才是
+你在 cmux 标签上看到的那行字。
 
 ---
 
@@ -153,7 +168,8 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 | `POST` | `/api/hooks/:agent` | Hook 上报（独立 Hook 密钥，仅限本机回环） |
 | `GET` | `/api/audit` | 最近的写操作审计 |
 
-允许的按键：`enter` `escape` `tab` `up` `down` `ctrl+c`。
+允许的按键：`enter` `escape` `tab` `up` `down` `left` `right` `ctrl+c`。
+按键条在手机上是单行横滑的。不提供 `ctrl+d`：实测对着 shell 发 EOF 会直接把 surface 关掉。
 
 WebSocket `/ws`：
 

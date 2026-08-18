@@ -281,7 +281,7 @@ describe("安全：按键白名单与危险操作确认（§22 / §23.4）", () 
     const harness = await createHarness();
     const cookie = await loginWithControl(harness);
 
-    for (const key of ["enter", "escape", "tab", "up", "down"]) {
+    for (const key of ["enter", "escape", "tab", "up", "down", "left", "right"]) {
       const response = await harness.request("/api/surfaces/sf-11/key", {
         method: "POST",
         cookie,
@@ -290,7 +290,7 @@ describe("安全：按键白名单与危险操作确认（§22 / §23.4）", () 
       expect(response.status, key).toBe(200);
     }
 
-    for (const key of ["ctrl+d", "f5", "rm -rf /", ""]) {
+    for (const key of ["ctrl+d", "ctrl+z", "f5", "rm -rf /", ""]) {
       const response = await harness.request("/api/surfaces/sf-11/key", {
         method: "POST",
         cookie,
@@ -320,6 +320,19 @@ describe("安全：按键白名单与危险操作确认（§22 / §23.4）", () 
     });
     expect(confirmed.status).toBe(200);
     expect(harness.client.sentKeys).toEqual([{ surfaceId: "sf-11", key: "ctrl+c" }]);
+  });
+
+  it("Ctrl+D 不在白名单里，带 confirm 也发不出去", async () => {
+    const harness = await createHarness();
+    const cookie = await loginWithControl(harness);
+
+    const response = await harness.request("/api/surfaces/sf-11/key", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ key: "ctrl+d", confirm: true }),
+    });
+    expect(response.status).toBe(400);
+    expect(harness.client.sentKeys).toHaveLength(0);
   });
 
   it("写操作必须落在具体 surface 上，路径缺 surface 直接 404", async () => {
