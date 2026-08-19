@@ -7,7 +7,6 @@ import {
   attentionGroupOf,
 } from "@car/protocol";
 import { formatAgo, formatDuration } from "@car/shared";
-import { AgentRow } from "../components/AgentRow.tsx";
 import { ControlToggle, TopBar } from "../components/TopBar.tsx";
 import { agentsBySurface, useAppStore } from "../stores/AppStore.tsx";
 import type { Route } from "../hooks/useRouter.ts";
@@ -15,26 +14,22 @@ import type { Route } from "../hooks/useRouter.ts";
 /**
  * 首页（需求文档 §5 / §6）。
  *
- * 两个视图共用一页：
- *   结构 —— 直接按 cmux 的 Workspace → Pane → Surface 渲染，这是默认视图；
- *   关注 —— 按 NEEDS YOU / WORKING / IDLE 排序的 Attention Inbox。
+ * 只有一个视图：直接按 cmux 的 Workspace → Pane → Surface 渲染。
+ * 需要你处理的 Agent 数量走顶栏汇总和 workspace 标题上的角标，不再单独占一屏。
  * 展开折叠状态与筛选条件存在 localStorage，刷新和重连都不会丢。
  */
 
 const TREE_REFRESH_MS = 4000;
 const PREFS_KEY = "car.home.prefs.v1";
 
-type ViewMode = "tree" | "attention";
-
 interface Prefs {
-  view: ViewMode;
   /** 只显示跑着 Agent 的 surface。 */
   agentsOnly: boolean;
   /** 折叠起来的 workspace / pane key。 */
   collapsed: string[];
 }
 
-const DEFAULT_PREFS: Prefs = { view: "tree", agentsOnly: true, collapsed: [] };
+const DEFAULT_PREFS: Prefs = { agentsOnly: true, collapsed: [] };
 
 function loadPrefs(): Prefs {
   try {
@@ -42,7 +37,6 @@ function loadPrefs(): Prefs {
     if (!raw) return DEFAULT_PREFS;
     const parsed = JSON.parse(raw) as Partial<Prefs>;
     return {
-      view: parsed.view === "attention" ? "attention" : "tree",
       agentsOnly: parsed.agentsOnly !== false,
       collapsed: Array.isArray(parsed.collapsed) ? parsed.collapsed.filter((x) => typeof x === "string") : [],
     };
@@ -50,12 +44,6 @@ function loadPrefs(): Prefs {
     return DEFAULT_PREFS;
   }
 }
-
-const GROUP_TITLE: Record<AttentionGroup, string> = {
-  NEEDS_YOU: "NEEDS YOU",
-  WORKING: "WORKING",
-  IDLE: "IDLE",
-};
 
 interface VisiblePane {
   pane: CmuxPane;
@@ -196,72 +184,49 @@ export function HomePage({
     <div className="page">
       <TopBar title={title} subtitle={summaryText} onBack={back} right={<ControlToggle />} />
 
-      <div className="view-switch">
+      <div className="tree-toolbar">
+        <div className="tree-search-wrap">
+          <input
+            className="tree-search"
+            value={query}
+            placeholder="搜索 workspace / surface"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {query ? (
+            <button type="button" className="tree-search-clear" onClick={() => setQuery("")} aria-label="清空">
+              ✕
+            </button>
+          ) : null}
+        </div>
         <button
           type="button"
-          className={prefs.view === "tree" ? "on" : ""}
-          onClick={() => setPrefs((current) => ({ ...current, view: "tree" }))}
+          className={`chip-button ${prefs.agentsOnly ? "on" : ""}`}
+          onClick={() => setPrefs((current) => ({ ...current, agentsOnly: !current.agentsOnly }))}
+          title={prefs.agentsOnly ? "点击显示全部 surface" : "点击只看跑着 Agent 的 surface"}
         >
-          结构
+          {prefs.agentsOnly ? "只看 Agent" : "全部 surface"}
         </button>
-        <button
-          type="button"
-          className={prefs.view === "attention" ? "on" : ""}
-          onClick={() => setPrefs((current) => ({ ...current, view: "attention" }))}
-        >
-          关注{summary && summary.needsYou > 0 ? ` (${summary.needsYou})` : ""}
+        <button type="button" className="chip-button" onClick={toggleAll}>
+          {anyExpanded ? "全部折叠" : "全部展开"}
         </button>
       </div>
-
-      {prefs.view === "tree" ? (
-        <div className="tree-toolbar">
-          <div className="tree-search-wrap">
-            <input
-              className="tree-search"
-              value={query}
-              placeholder="搜索 workspace / surface"
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            {query ? (
-              <button type="button" className="tree-search-clear" onClick={() => setQuery("")} aria-label="清空">
-                ✕
-              </button>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            className={`chip-button ${prefs.agentsOnly ? "on" : ""}`}
-            onClick={() => setPrefs((current) => ({ ...current, agentsOnly: !current.agentsOnly }))}
-            title={prefs.agentsOnly ? "点击显示全部 surface" : "点击只看跑着 Agent 的 surface"}
-          >
-            {prefs.agentsOnly ? "只看 Agent" : "全部 surface"}
-          </button>
-          <button type="button" className="chip-button" onClick={toggleAll}>
-            {anyExpanded ? "全部折叠" : "全部展开"}
-          </button>
-        </div>
-      ) : null}
 
       <div className="scroll-area">
         {connection !== "open" ? (
           <div className="banner">连接中断，正在自动重连…（已退化为轮询）</div>
         ) : null}
 
-        {prefs.view === "attention" ? (
-          <AttentionView inbox={inbox} now={now} navigate={navigate} />
-        ) : (
-          <TreeView
-            model={model}
-            agents={agents}
-            now={now}
-            collapsed={collapsed}
-            forceExpand={forceExpand}
-            loading={!tree}
-            keyword={keyword}
-            onToggle={toggle}
-            navigate={navigate}
-          />
-        )}
+        <TreeView
+          model={model}
+          agents={agents}
+          now={now}
+          collapsed={collapsed}
+          forceExpand={forceExpand}
+          loading={!tree}
+          keyword={keyword}
+          onToggle={toggle}
+          navigate={navigate}
+        />
 
         <div className="footer-actions">
           <button
@@ -282,43 +247,6 @@ export function HomePage({
         </div>
       </div>
     </div>
-  );
-}
-
-function AttentionView({
-  inbox,
-  now,
-  navigate,
-}: {
-  inbox: ReturnType<typeof useAppStore>["inbox"];
-  now: number;
-  navigate: (route: Route) => void;
-}) {
-  if (inbox && inbox.groups.length === 0) {
-    return (
-      <div className="empty">
-        <p>还没有发现运行中的 Agent。</p>
-        <p className="empty-hint">在 cmux 里启动 Claude / Codex / Grok 后会自动出现在这里。</p>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {inbox?.groups.map((group) => (
-        <section className="group" key={group.group}>
-          <h2 className="group-title">{GROUP_TITLE[group.group]}</h2>
-          {group.agents.map((agent) => (
-            <AgentRow
-              key={agent.surfaceId}
-              agent={agent}
-              now={now}
-              onOpen={(surfaceId) => navigate({ name: "session", surfaceId })}
-            />
-          ))}
-        </section>
-      ))}
-    </>
   );
 }
 

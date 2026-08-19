@@ -156,60 +156,7 @@ body {
   padding: 8px 12px calc(24px + var(--safe-bottom));
 }
 
-.group {
-  margin-top: 18px;
-}
-
-.group-title {
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  color: var(--text-dim);
-  margin: 0 0 8px 4px;
-  font-weight: 700;
-}
-
-.agent-row {
-  display: flex;
-  width: 100%;
-  gap: 12px;
-  text-align: left;
-  background: var(--bg-row);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 8px;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.agent-row:active {
-  background: #171c22;
-}
-
-.agent-row-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.agent-row-title {
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.agent-row-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-dim);
-  margin-top: 3px;
-}
-
-/* workspace 归属标记：主标题是 surface 名，workspace 名跟在下面 */
+/* workspace 归属标记：会话页标题是 surface 名，workspace 名跟在下面 */
 .ws-chip {
   display: inline-block;
   max-width: 100%;
@@ -227,33 +174,6 @@ body {
 .ws-chip-button {
   font-family: inherit;
   cursor: pointer;
-}
-
-.agent-row-activity {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.agent-row-side {
-  text-align: right;
-  flex: none;
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.agent-row-surface {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  margin-top: 4px;
-  opacity: 0.7;
-}
-
-.agent-kind {
-  color: var(--text);
-  opacity: 0.85;
 }
 
 /* ---------- 状态 ---------- */
@@ -297,38 +217,13 @@ body {
   color: #4b5563;
 }
 
-/* ---------- 视图切换 + 结构树工具条 ---------- */
-
-.view-switch {
-  display: flex;
-  gap: 6px;
-  padding: 10px 12px 0;
-}
-
-.view-switch button {
-  flex: 1;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-dim);
-  border-radius: 999px;
-  padding: 7px 12px;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.view-switch button.on {
-  background: #1c232c;
-  border-color: #37414d;
-  color: var(--text);
-  font-weight: 600;
-}
+/* ---------- 结构树工具条 ---------- */
 
 .tree-toolbar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px 0;
+  padding: 10px 12px 0;
 }
 
 .tree-search-wrap {
@@ -941,7 +836,6 @@ body {
 
 @media (min-width: 768px) {
   .scroll-area,
-  .view-switch,
   .tree-toolbar,
   .session-header,
   .session-tools,

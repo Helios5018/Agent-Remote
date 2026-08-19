@@ -55,14 +55,14 @@ bun run start -- --unlock            # 自己输错被锁了，解锁
 
 ---
 
-## 两个页面、两个视图
+## 两个页面
 
 | 页面 | 作用 |
 |------|------|
-| **首页**（`#/`） | 两个视图切换：**结构** / **关注** |
+| **首页**（`#/`） | 按 cmux 结构展开的 Agent 总览 |
 | **Agent 会话**（`#/s/:surfaceId`） | 使用频率最高：看最近输出、发 Prompt、发控制键 |
 
-首页默认是**结构视图**，直接按 cmux 的真实层级渲染：
+首页直接按 cmux 的真实层级渲染：
 
 ```text
 Workspace ── Pane ── Surface ── Agent
@@ -75,14 +75,16 @@ Workspace ── Pane ── Surface ── Agent
 - 折叠的 workspace 标题上仍会显示 `2 需要你` / `1 运行中` / `+3`（被隐藏的 surface 数）
 - 非 Agent 的 surface 也能点开只读查看输出
 
-**关注视图**就是 Attention Inbox，按注意力优先级排序，只回答「哪些 Agent 现在需要我」：
+标题一律 **surface 名为主、workspace 名为辅**（`▤ workspace`）—— surface 名才是你在 cmux
+标签上看到的那行字。
+
+「哪些 Agent 现在需要我」不再单独占一个视图：顶栏汇总（`2 需要你 · 1 运行中 · 5 空闲`）和
+workspace 标题上的角标已经把这件事说清楚了。服务端仍然按注意力优先级排序，
+`GET /api/agents` 返回的分组顺序是：
 
 ```text
 ERROR → NEEDS_APPROVAL → NEEDS_INPUT → RESPONDED_UNREAD → POSSIBLY_STALE → WORKING → IDLE
 ```
-
-两个视图里的标题都是 **surface 名为主、workspace 名为辅**（`▤ workspace`）—— surface 名才是
-你在 cmux 标签上看到的那行字。
 
 ---
 
@@ -277,10 +279,11 @@ Hook 与 surface 的关联顺序：`CMUX_SURFACE_ID` → pid 反查 cmux 进程�
 ## 开发
 
 ```bash
-bun run test          # Vitest，193 个用例
+bun run test          # Vitest，206 个用例
 bun run typecheck     # tsc --noEmit
 bun run dev           # 服务端（watch）
 bun run dev:web       # 前端 dev server（:4319，代理到 :4318）
 ```
 
-第一版不使用 xterm.js，输出以纯文本 `pre` 渲染 —— 手机阅读体验更好。
+第一版不使用 xterm.js：终端画面自己按 cmux 的渲染网格逐格渲染，见上面
+「终端画面怎么还原的」—— 体积比 xterm.js 小得多，手机上也更好读。
