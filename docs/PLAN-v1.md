@@ -54,4 +54,4 @@
 
 ## 计划文件路径
 
-/Users/link/AgentWork/Tasks/20260817-Agent-Remote/docs/PLAN-v1.md
+/Users/link/AgentWork/PersonalProjcects/Agent-Remote/docs/PLAN-v1.md
