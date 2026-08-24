@@ -1,5 +1,7 @@
 # CMUX Agent Remote — 产品与技术需求文档
 
+> **现役对照（2026-08-24）**：本文是立项需求，不是运行手册。用法与实现以 [README.md](../README.md) 为准。已落地但与原文不同的几处：首页是 cmux 结构树（注意力走顶栏汇总，不再单独 Inbox 页）；鉴权是 4 位 PIN + 限流，不是长 Token；会话页终端走 `cmux rpc terminal.replay` 网格。
+
 ## 1. 产品概述
 
 ### 1.1 产品定位

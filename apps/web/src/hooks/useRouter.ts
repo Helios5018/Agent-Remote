@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 
 /**
  * 极简 hash 路由（不引第三方依赖，手机上加载更快）。
- *   #/            首页 Attention Inbox
- *   #/w/:id       Workspace 页
+ *   #/            首页：cmux 结构树
+ *   #/w/:id       只看某一个 workspace（深链；`all` 等于首页）
  *   #/s/:id       Agent 会话页
  */
 export type Route =

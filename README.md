@@ -55,11 +55,12 @@ bun run start -- --unlock            # 自己输错被锁了，解锁
 
 ---
 
-## 两个页面
+## 页面
 
 | 页面 | 作用 |
 |------|------|
 | **首页**（`#/`） | 按 cmux 结构展开的 Agent 总览 |
+| **单 Workspace**（`#/w/:workspaceId`） | 首页的深链，只展开某一个 workspace（`#/w/all` 等于首页） |
 | **Agent 会话**（`#/s/:surfaceId`） | 使用频率最高：看最近输出、发 Prompt、发控制键 |
 
 首页直接按 cmux 的真实层级渲染：
@@ -157,8 +158,10 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| `GET` | `/api/health` | 健康检查（无需登录） |
 | `POST` | `/api/auth/login` | PIN 换 Session Cookie（带限流） |
 | `GET` | `/api/auth/session` | 当前登录态与控制模式 |
+| `POST` | `/api/auth/logout` | 退出登录 |
 | `POST` | `/api/auth/control` | 开启 / 关闭控制模式 |
 | `GET` | `/api/agents` | Attention Inbox（分组 + 汇总） |
 | `GET` | `/api/agents/:surfaceId` | Agent 详情 + 输出快照（并标记已读） |
@@ -206,13 +209,17 @@ WebSocket `/ws`：
 
 ```jsonc
 // 客户端 → 服务端
-{ "type": "subscribe", "surfaceId": "…" }
+{ "type": "subscribe", "surfaceId": "…" }   // 正在查看的 surface；null 表示离开会话页
 { "type": "ping" }
 
 // 服务端 → 客户端
-{ "type": "agent.status_changed", "surfaceId": "…", "status": "needs_approval", "agent": { … } }
+{ "type": "hello", "serverVersion": "0.1.0", "controlMode": false, "now": 0 }
+{ "type": "agent.status_changed", "surfaceId": "…", "status": "NEEDS_APPROVAL", "agent": { … } }
 { "type": "agent.list_changed", "inbox": { … } }
-{ "type": "surface.snapshot", "surfaceId": "…", "revision": 128, "content": "…" }
+{ "type": "surface.snapshot", "surfaceId": "…", "revision": 128, "content": "…" }  // 纯文本，给后台变化检测
+{ "type": "surface.grid", "surfaceId": "…", "grid": { … } }                       // 会话页彩色画面
+{ "type": "pong", "now": 0 }
+{ "type": "error", "code": "…", "message": "…" }
 ```
 
 ---
@@ -280,7 +287,7 @@ Hook 与 surface 的关联顺序：`CMUX_SURFACE_ID` → pid 反查 cmux 进程�
 
 ```bash
 bun run test          # Vitest，206 个用例
-bun run typecheck     # tsc --noEmit
+bun run typecheck     # tsc -b
 bun run dev           # 服务端（watch）
 bun run dev:web       # 前端 dev server（:4319，代理到 :4318）
 ```
