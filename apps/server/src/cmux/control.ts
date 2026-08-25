@@ -1,4 +1,4 @@
-import type { CmuxKey } from "@car/protocol";
+import type { CmuxKey, ScrollKey } from "@car/protocol";
 
 /**
  * 控制类命令的参数构造。
@@ -20,6 +20,15 @@ export function buildSendTextArgs(surfaceId: string, text: string): string[] {
 }
 
 export function buildSendKeyArgs(surfaceId: string, key: CmuxKey): string[] {
+  assertSurfaceTarget(surfaceId);
+  return ["send-key", "--surface", surfaceId, "--", key];
+}
+
+/**
+ * 翻页。走的还是 send-key，但语义上只是换一屏来看，
+ * 所以在 API 层不要求控制模式（见 `SurfaceScrollRequestSchema`）。
+ */
+export function buildScrollKeyArgs(surfaceId: string, key: ScrollKey): string[] {
   assertSurfaceTarget(surfaceId);
   return ["send-key", "--surface", surfaceId, "--", key];
 }

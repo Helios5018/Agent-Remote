@@ -62,6 +62,8 @@ export const SurfaceGridSchema = z.object({
   scrollbackRows: z.number().int().nonnegative(),
   /** 该 surface 总共还有多少行历史，用于判断能不能继续往上翻。 */
   historyRows: z.number().int().nonnegative(),
+  /** 终端当前已经上滚了多少行；> 0 表示看到的不是最新一屏。 */
+  scrolledRows: z.number().int().nonnegative(),
   /**
    * 是否处于备用屏（全屏 TUI，例如 Claude / Grok 的界面）。
    * 备用屏必须按网格等比缩放，普通屏可以软换行。
@@ -89,4 +91,15 @@ export function isViewportRow(grid: SurfaceGrid, row: number): boolean {
 /** 网格一共有多少行。 */
 export function gridRowCount(grid: SurfaceGrid): number {
   return grid.scrollbackRows + grid.viewportRows;
+}
+
+/**
+ * 网格之外还剩多少行历史拿不到。
+ *
+ * `terminal.replay` 每次固定只带最近 240 行回滚，更早的部分要另走
+ * `read-screen --scrollback`（纯文本，没有颜色）。备用屏没有 scrollback，
+ * 这里恒为 0 —— 那种情况只能靠翻页键让 TUI 自己重画。
+ */
+export function gridMissingHistoryRows(grid: SurfaceGrid): number {
+  return Math.max(0, grid.historyRows - grid.scrollbackRows);
 }

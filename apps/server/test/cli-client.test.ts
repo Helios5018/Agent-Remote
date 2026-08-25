@@ -128,6 +128,34 @@ describe("CmuxCliClient", () => {
     ]);
     expect(calls.at(-1)).toEqual(["send-key", "--surface", "SURF-11", "--", "enter"]);
   });
+
+  it("翻页也是 send-key，但走独立入口", async () => {
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner });
+    await client.scrollSurface("SURF-11", "pageup");
+    expect(calls.at(-1)).toEqual(["send-key", "--surface", "SURF-11", "--", "pageup"]);
+  });
+
+  it("读历史带 --scrollback，且不动状态推断的基线", async () => {
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner });
+    const before = (await client.readSurface("SURF-11")).revision;
+
+    const text = await client.readHistory("SURF-11", 1500);
+    expect(text.length).toBeGreaterThan(0);
+    expect(calls.at(-1)).toEqual([
+      "read-screen",
+      "--surface",
+      "SURF-11",
+      "--lines",
+      "1500",
+      "--json",
+      "--scrollback",
+    ]);
+
+    // 读历史如果进了 SnapshotTracker，这里的 revision 会被顶上去
+    expect((await client.readSurface("SURF-11")).revision).toBe(before);
+  });
 });
 
 describe("写操作必须显式指定 surface（§23.3）", () => {

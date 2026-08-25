@@ -38,6 +38,11 @@ scripts/           cmux-agent-web-hook + 安装/卸载
 - 调 cmux 走参数数组，不经过 shell。SQLite 不存终端全文和 prompt。
 - 路由：`#/` 结构树首页，`#/s/:id` 会话，`#/w/:id` 单 workspace 深链。不要把首页改回独立 Inbox。
 - 会话页终端走 `cmux rpc terminal.replay` 网格，不要退回纯 `read-screen`。
+- 回看历史分两条路，别混：普通屏用 `read-screen --scrollback`（`/history`，纯文本、不进 SnapshotTracker），
+  全屏 TUI 只能发 `pageup` 让它自己翻（`/scroll`，只读模式放行，离开会话自动 `bottom` 复位）。
+  `terminal.replay` 只吃 `surface_id`，回滚 240 行封顶，别再找参数了。
+- 别再找「按行滚动 / 转发滚轮」的 cmux 接口：`terminal.scroll`、`terminal.mouse` 实测是空壳
+  （不校验参数、画面不动）。TUI 只能整屏翻，前端用手势（`usePageGesture`）包装成翻页。
 
 ## 当前状态（2026-08-24）
 

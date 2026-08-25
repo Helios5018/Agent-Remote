@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AgentStateSchema, InboxSchema } from "./agent.ts";
-import { CmuxKeySchema, CmuxTreeSchema, SurfaceSnapshotSchema } from "./cmux.ts";
+import { CmuxKeySchema, CmuxTreeSchema, ScrollActionSchema, SurfaceSnapshotSchema } from "./cmux.ts";
+import { SurfaceGridSchema } from "./grid.ts";
 
 /** POST /api/auth/login */
 export const LoginRequestSchema = z.object({
@@ -58,6 +59,40 @@ export const SurfaceKeyRequestSchema = z.object({
   confirm: z.boolean().optional(),
 });
 export type SurfaceKeyRequest = z.infer<typeof SurfaceKeyRequestSchema>;
+
+/**
+ * POST /api/surfaces/:surfaceId/scroll —— 翻页。
+ *
+ * 和 /key 分开：翻页只改「看到哪一屏」，不往终端里写东西，所以只读模式也允许。
+ */
+export const SurfaceScrollRequestSchema = z.object({
+  action: ScrollActionSchema,
+});
+export type SurfaceScrollRequest = z.infer<typeof SurfaceScrollRequestSchema>;
+
+/** 翻页后顺带把新画面带回来，省掉一次往返。 */
+export const SurfaceScrollResponseSchema = z.object({
+  ok: z.literal(true),
+  grid: SurfaceGridSchema,
+});
+export type SurfaceScrollResponse = z.infer<typeof SurfaceScrollResponseSchema>;
+
+/**
+ * GET /api/surfaces/:surfaceId/history —— 网格之外更早的历史（纯文本、无颜色）。
+ *
+ * `terminal.replay` 只给最近 240 行回滚，再往上只能走 `read-screen --scrollback`。
+ */
+export const SurfaceHistoryResponseSchema = z.object({
+  /** 已经去掉与网格重叠部分之后的历史文本。 */
+  text: z.string(),
+  /** cmux 一共给了多少行（含与网格重叠的部分）。 */
+  totalLines: z.number().int().nonnegative(),
+  /** 因为与网格重叠而被去掉的尾部行数。 */
+  droppedTail: z.number().int().nonnegative(),
+  /** 是否顶到了请求行数上限，上面可能还有更早的内容。 */
+  truncated: z.boolean(),
+});
+export type SurfaceHistoryResponse = z.infer<typeof SurfaceHistoryResponseSchema>;
 
 export const OkResponseSchema = z.object({
   ok: z.literal(true),

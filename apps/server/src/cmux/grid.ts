@@ -108,6 +108,7 @@ export function parseRenderGrid(raw: unknown, options: ParseGridOptions): Parsed
 
   const viewportRows = num(gridRaw["rows"]) ?? num(root["rows"]) ?? 0;
   const scrollbackRows = num(gridRaw["scrollback_rows"]) ?? 0;
+  const scrolledRows = num(gridRaw["scrolled_rows"]) ?? 0;
 
   const spans: GridSpan[] = [];
   const push = (span: RawSpan | null, rowOffset: number) => {
@@ -129,9 +130,10 @@ export function parseRenderGrid(raw: unknown, options: ParseGridOptions): Parsed
     visible: cursorRaw["visible"] === true,
   };
 
-  // 指纹只覆盖会影响画面的部分：样式表 + 段 + 光标
+  // 指纹只覆盖会影响画面的部分：样式表 + 段 + 光标 + 滚动位置
+  // （翻到顶之后再按上一页，画面可能一模一样，靠 scrolledRows 才知道位置变了）
   const print = fingerprint(
-    JSON.stringify([styles, spans, cursor, columns, viewportRows, scrollbackRows]),
+    JSON.stringify([styles, spans, cursor, columns, viewportRows, scrollbackRows, scrolledRows]),
   );
   const revision =
     options.previous && options.previous.fingerprint === print
@@ -146,6 +148,7 @@ export function parseRenderGrid(raw: unknown, options: ParseGridOptions): Parsed
       viewportRows,
       scrollbackRows,
       historyRows: num(gridRaw["history_rows"]) ?? 0,
+      scrolledRows,
       altScreen: str(gridRaw["active_screen"]) === "alternate",
       foreground,
       background,

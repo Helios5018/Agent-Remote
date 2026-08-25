@@ -176,6 +176,8 @@ describe("Poller 刷新策略（§18）", () => {
       getTree: () => client.getTree(),
       sendText: (id: string, text: string) => client.sendText(id, text),
       sendKey: (id: string, key: "enter") => client.sendKey(id, key),
+      scrollSurface: (id: string, key: "pageup") => client.scrollSurface(id, key),
+      readHistory: (id: string, lines: number) => client.readHistory(id, lines),
       readSurface: async () => {
         throw new Error("read-screen timeout");
       },

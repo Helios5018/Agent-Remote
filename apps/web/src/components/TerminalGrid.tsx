@@ -26,6 +26,12 @@ export type GridLayout = "fit" | "flow";
 /** 单个字符格的宽高比例，用探针实测后覆盖。 */
 const FALLBACK_CELL_RATIO = 0.6;
 
+/**
+ * 基准字号。fit 模式下没法直接用字号（整屏要缩到屏宽），
+ * 这里拿它当分母，把调字号换算成缩放倍数：1.0 就是正好铺满屏宽。
+ */
+export const DEFAULT_GRID_FONT_SIZE = 12.5;
+
 interface Row {
   row: number;
   spans: GridSpan[];
@@ -91,7 +97,7 @@ function styleOf(style: GridStyle | undefined, grid: SurfaceGrid): React.CSSProp
 export function TerminalGrid({
   grid,
   layout,
-  baseFontSize = 12.5,
+  baseFontSize = DEFAULT_GRID_FONT_SIZE,
 }: {
   grid: SurfaceGrid;
   layout: GridLayout;
@@ -122,10 +128,13 @@ export function TerminalGrid({
 
   const rows = useMemo(() => groupRows(grid), [grid]);
 
-  // fit 模式：缩字号让 columns 列正好铺满容器宽度
+  // fit 模式：缩字号让 columns 列正好铺满容器宽度。
+  // 调字号在这里变成缩放倍数 —— 手机上 120 列铺满屏宽只有 3px 高，
+  // 想读清楚就得放大，代价是要横向滑动看完一行。
+  const fitFontSize = Math.min(DEFAULT_GRID_FONT_SIZE, hostWidth / (grid.columns * cellRatio));
   const fontSize =
     layout === "fit" && hostWidth > 0
-      ? Math.max(4, Math.min(baseFontSize, hostWidth / (grid.columns * cellRatio)))
+      ? Math.max(3, fitFontSize * (baseFontSize / DEFAULT_GRID_FONT_SIZE))
       : baseFontSize;
   const cellWidth = fontSize * cellRatio;
 

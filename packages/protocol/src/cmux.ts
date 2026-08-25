@@ -89,6 +89,30 @@ export type CmuxKey = z.infer<typeof CmuxKeySchema>;
 export const ALLOWED_KEYS: readonly CmuxKey[] = CmuxKeySchema.options;
 
 /**
+ * 翻页键。
+ *
+ * 单独一组、不并进 CmuxKeySchema：翻页不改终端里的任何内容，只是让终端
+ * （或全屏 TUI 自己）换一屏来画，所以只读模式也放行。全屏 TUI 的历史不在
+ * 终端的 scrollback 里 —— `terminal.replay` 对备用屏永远只给一屏，
+ * 想回看更早的输出只有让 TUI 自己翻页这一条路。
+ *
+ * 只收这两个键：`home` / `end` cmux 虽然认，但语义不可靠 —— 实测对
+ * Claude Code 按 `end` 画面纹丝不动，对 shell 又变成「光标移到行尾」，
+ * 那已经不是看一眼的事了。
+ */
+export const ScrollKeySchema = z.enum(["pageup", "pagedown"]);
+export type ScrollKey = z.infer<typeof ScrollKeySchema>;
+
+/**
+ * 前端可以请求的翻页动作。
+ *
+ * `bottom` 没有对应按键，是服务端连按 pagedown 直到画面不再变化 ——
+ * TUI 没有「跳到底部」的通用键，只能这么退回最新一屏。
+ */
+export const ScrollActionSchema = z.enum(["pageup", "pagedown", "bottom"]);
+export type ScrollAction = z.infer<typeof ScrollActionSchema>;
+
+/**
  * 需要二次确认的危险操作（需求文档 §23.4）。
  *
  * 这里不放 Ctrl+D：实测对着 shell 发 EOF 会直接把 surface 关掉，

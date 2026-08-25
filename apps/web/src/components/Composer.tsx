@@ -29,15 +29,19 @@ const KEY_GROUPS: KeyButton[][] = [
 
 export function Composer({
   disabled,
+  collapsible = false,
   onSend,
   onKey,
 }: {
   disabled: boolean;
+  /** 沉浸模式下先收成一条，点开才展开 —— 输入框 + 按键条在手机上要吃掉小半屏。 */
+  collapsible?: boolean;
   onSend: (text: string, submit: boolean) => Promise<void>;
   onKey: (key: CmuxKey, confirm: boolean) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [pendingKey, setPendingKey] = useState<CmuxKey | null>(null);
   // 中文输入法组字期间不能提交（需求文档 §26 中文输入）
   const [composing, setComposing] = useState(false);
@@ -88,8 +92,23 @@ export function Composer({
     }
   };
 
+  if (collapsible && !expanded) {
+    return (
+      <div className="composer composer-collapsed">
+        <button type="button" className="composer-expand" onClick={() => setExpanded(true)}>
+          {disabled ? "只读模式 · 点这里展开输入区" : "点这里输入…"}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="composer">
+      {collapsible ? (
+        <button type="button" className="composer-collapse" onClick={() => setExpanded(false)} title="收起输入区">
+          收起 ⌄
+        </button>
+      ) : null}
       {disabled ? <div className="composer-hint">只读模式：点击右上角 READ ONLY 开启控制</div> : null}
       <div className="composer-input-row">
         <textarea

@@ -2,8 +2,11 @@ import type {
   AgentDetailResponse,
   CmuxKey,
   Inbox,
+  ScrollAction,
   SessionInfo,
   SurfaceGrid,
+  SurfaceHistoryResponse,
+  SurfaceScrollResponse,
   SurfaceSnapshot,
   TreeResponse,
 } from "@car/protocol";
@@ -81,4 +84,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ key, confirm }),
     }),
+
+  /** 翻页：只读模式下也允许，响应里直接带回滚动后的新画面。 */
+  scroll: (surfaceId: string, action: ScrollAction) =>
+    request<SurfaceScrollResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/scroll`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    }),
+
+  /** 网格之外更早的历史（纯文本）。drop 传当前网格已画出的行数，避免重复。 */
+  history: (surfaceId: string, drop: number) =>
+    request<SurfaceHistoryResponse>(
+      `/api/surfaces/${encodeURIComponent(surfaceId)}/history?drop=${Math.max(0, Math.floor(drop))}`,
+    ),
 };

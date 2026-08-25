@@ -109,6 +109,17 @@ describe("终端渲染网格（§26 终端保真）", () => {
     expect(changed.revision).toBe(first.revision + 1);
   });
 
+  it("带上滚动位置：画面一样但位置变了，也要当成新版本", () => {
+    const tracker = new GridTracker();
+    const bottom = tracker.parse(sample(), "sf-1", 1);
+    expect(bottom.scrolledRows).toBe(0);
+
+    const scrolled = tracker.parse(sample({ render_grid: { scrolled_rows: 40 } }), "sf-1", 2);
+    expect(scrolled.scrolledRows).toBe(40);
+    // 只有位置变了，spans 一模一样；不进指纹的话前端就收不到这次变化
+    expect(scrolled.revision).toBe(bottom.revision + 1);
+  });
+
   it("输出符合协议 schema", () => {
     const { grid } = parseRenderGrid(sample(), { surfaceId: "sf-1", now: 1000 });
     expect(SurfaceGridSchema.safeParse(grid).success).toBe(true);

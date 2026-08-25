@@ -15,9 +15,11 @@ import type {
   CmuxTree,
   CmuxWorkspace,
   Inbox,
+  ScrollAction,
   ServerMessage,
   SessionInfo,
   SurfaceGrid,
+  SurfaceHistoryResponse,
 } from "@car/protocol";
 import { api, ApiError } from "../api.ts";
 import { useRealtime, type ConnectionState } from "../hooks/useRealtime.ts";
@@ -48,6 +50,10 @@ interface AppStoreValue {
   subscribe(surfaceId: string | null): void;
   sendInput(surfaceId: string, text: string, submit: boolean): Promise<void>;
   sendKey(surfaceId: string, key: CmuxKey, confirm?: boolean): Promise<void>;
+  /** 翻页（只读模式下也可用），成功后网格直接被替换成滚动后的画面。 */
+  scrollSurface(surfaceId: string, action: ScrollAction): Promise<void>;
+  /** 拉网格之外更早的历史（纯文本）。 */
+  loadHistory(surfaceId: string, drop: number): Promise<SurfaceHistoryResponse | null>;
   refreshOutput(surfaceId: string): Promise<void>;
   refreshGrid(surfaceId: string): Promise<void>;
   clearError(): void;
@@ -236,6 +242,13 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       async sendKey(surfaceId: string, key: CmuxKey, confirm = false) {
         await withError(() => api.sendKey(surfaceId, key, confirm));
       },
+
+      async scrollSurface(surfaceId: string, action: ScrollAction) {
+        const result = await withError(() => api.scroll(surfaceId, action));
+        if (result) setGrids((current) => ({ ...current, [surfaceId]: result.grid }));
+      },
+
+      loadHistory: (surfaceId: string, drop: number) => withError(() => api.history(surfaceId, drop)),
 
       refreshOutput,
       refreshGrid,

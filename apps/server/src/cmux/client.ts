@@ -1,4 +1,4 @@
-import type { CmuxKey, CmuxTree, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
+import type { CmuxKey, CmuxTree, ScrollKey, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
 
 /**
  * Module 1：cmux Adapter —— 系统的眼睛和手（需求文档 §13）。
@@ -27,6 +27,20 @@ export interface CmuxClient {
 
   /** 向 surface 发送按键。 */
   sendKey(surfaceId: string, key: CmuxKey): Promise<void>;
+
+  /**
+   * 翻页。只改看到哪一屏，不写入内容 —— 备用屏（全屏 TUI）的历史
+   * 拿不到 scrollback，只能靠这个让 TUI 自己重画更早的一屏。
+   */
+  scrollSurface(surfaceId: string, key: ScrollKey): Promise<void>;
+
+  /**
+   * 读取原始历史文本（含 scrollback，纯文本无颜色）。
+   *
+   * 与 `readSurface` 的区别：不进 SnapshotTracker、不参与状态推断 ——
+   * 一次性把上千行历史塞进快照会让「输出有没有变化」的判断全乱掉。
+   */
+  readHistory(surfaceId: string, lines: number): Promise<string>;
 }
 
 export interface ReadSurfaceOptions {

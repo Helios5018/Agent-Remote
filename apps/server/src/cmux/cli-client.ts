@@ -1,9 +1,10 @@
-import type { CmuxKey, CmuxTree, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
+import type { CmuxKey, CmuxTree, ScrollKey, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
 import { createSingleFlight, TtlCache } from "@car/shared";
 import { CmuxError, type CmuxClient, type ReadSurfaceOptions } from "./client.ts";
 import {
   buildReadScreenArgs,
   buildReplayArgs,
+  buildScrollKeyArgs,
   buildSendKeyArgs,
   buildSendTextArgs,
   TOP_ARGS,
@@ -101,6 +102,20 @@ export class CmuxCliClient implements CmuxClient {
     return snapshot;
   }
 
+  async readHistory(surfaceId: string, lines: number): Promise<string> {
+    const args = buildReadScreenArgs(surfaceId, lines, true);
+    const result = await this.runner(args, { timeoutMs: 12_000 });
+    if (result.code !== 0) {
+      const message = result.stderr.trim();
+      if (/not found|no such|unknown surface/i.test(message)) {
+        throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND", message);
+      }
+      throw new CmuxError(`读取历史失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", message);
+    }
+    // 刻意绕开 snapshots：这里的文本只给人看，不能污染状态推断的基线。
+    return parseReadScreenJson(parseJson(result.stdout) ?? {}).text;
+  }
+
   async readGrid(surfaceId: string): Promise<SurfaceGrid> {
     const result = await this.runner(buildReplayArgs(surfaceId), { timeoutMs: 8000 });
     if (result.code !== 0) {
@@ -135,6 +150,17 @@ export class CmuxCliClient implements CmuxClient {
     const result = await this.runner(buildSendKeyArgs(surfaceId, key), { timeoutMs: 8000 });
     if (result.code !== 0) {
       throw new CmuxError(`发送按键失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", result.stderr.trim());
+    }
+  }
+
+  async scrollSurface(surfaceId: string, key: ScrollKey): Promise<void> {
+    const result = await this.runner(buildScrollKeyArgs(surfaceId, key), { timeoutMs: 8000 });
+    if (result.code !== 0) {
+      const message = result.stderr.trim();
+      if (/not found|no such|unknown surface/i.test(message)) {
+        throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND", message);
+      }
+      throw new CmuxError(`翻页失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", message);
     }
   }
 }

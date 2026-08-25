@@ -27,6 +27,10 @@ export interface ServerConfig {
   demo: boolean;
   /** 输出最多保留多少行。 */
   maxOutputLines: number;
+  /** 「加载更早的历史」单次最多回溯多少行。 */
+  maxHistoryLines: number;
+  /** 翻页后等 TUI 重绘多久再截图；太快会读到旧画面。 */
+  scrollRedrawDelayMs: number;
 }
 
 export interface ParseArgsResult {
@@ -58,6 +62,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     trustProxy: env["CAR_TRUST_PROXY"] === "1",
     demo: env["CAR_DEMO"] === "1",
     maxOutputLines: Number(env["CAR_MAX_OUTPUT_LINES"] ?? 400),
+    maxHistoryLines: Number(env["CAR_MAX_HISTORY_LINES"] ?? 5000),
+    scrollRedrawDelayMs: Number(env["CAR_SCROLL_REDRAW_DELAY_MS"] ?? 160),
   };
   let help = false;
   let pinProvided = config.pin.length > 0;
@@ -118,6 +124,10 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
 
   if (!Number.isFinite(config.port) || config.port <= 0) config.port = DEFAULT_PORT;
   if (!Number.isFinite(config.pinLength)) config.pinLength = MIN_PIN_LENGTH;
+  if (!Number.isFinite(config.maxHistoryLines) || config.maxHistoryLines <= 0) config.maxHistoryLines = 5000;
+  if (!Number.isFinite(config.scrollRedrawDelayMs) || config.scrollRedrawDelayMs < 0) {
+    config.scrollRedrawDelayMs = 160;
+  }
 
   return { config, help, pinProvided, rotatePin, rotateHookToken, unlock };
 }

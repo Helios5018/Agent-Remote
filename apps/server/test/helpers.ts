@@ -45,6 +45,9 @@ export async function createHarness(options: { pin?: string; trustProxy?: boolea
     staleAfterMs: 600_000,
     demo: true,
     maxOutputLines: 400,
+    maxHistoryLines: 5000,
+    // 测试用假 cmux，没有真的重绘要等
+    scrollRedrawDelayMs: 0,
   };
 
   const client = new FakeCmuxClient(undefined, now);

@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
-import type { AgentDetailResponse, Inbox, SessionInfo, SurfaceSnapshot } from "@car/protocol";
+import type {
+  AgentDetailResponse,
+  Inbox,
+  SessionInfo,
+  SurfaceGrid,
+  SurfaceHistoryResponse,
+  SurfaceScrollResponse,
+  SurfaceSnapshot,
+} from "@car/protocol";
+import { GRID_SPAN_TEXT } from "@car/protocol";
 import { createHarness, loginWithControl, TEST_HOOK_TOKEN, TEST_PIN } from "./helpers.ts";
+
+/** 网格里的可见文字，用来断言「翻页之后看到的是哪一屏」。 */
+function gridText(grid: SurfaceGrid): string {
+  return grid.spans.map((span) => span[GRID_SPAN_TEXT]).join("\n");
+}
 
 describe("安全：Access Token 与 Session", () => {
   it("未登录访问任何数据接口都是 401", async () => {
@@ -414,6 +428,87 @@ describe("API：Agents / Tree / Output", () => {
     const harness = await createHarness();
     const cookie = await harness.loginCookie();
     expect((await harness.request("/api/agents/nope", { cookie })).status).toBe(404);
+  });
+});
+
+describe("API：回看历史（翻页 + 更早的纯文本）", () => {
+  it("翻页只读模式也能用，并直接带回滚动后的画面", async () => {
+    const harness = await createHarness();
+    // 注意是 loginCookie 而不是 loginWithControl：翻页不写内容，不该要控制模式
+    const cookie = await harness.loginCookie();
+
+    const before = (await (await harness.request("/api/surfaces/sf-11/grid", { cookie })).json()) as SurfaceGrid;
+    expect(before.scrolledRows).toBe(0);
+
+    const response = await harness.request("/api/surfaces/sf-11/scroll", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ action: "pageup" }),
+    });
+    expect(response.status).toBe(200);
+
+    const scrolled = (await response.json()) as SurfaceScrollResponse;
+    expect(scrolled.grid.scrolledRows).toBeGreaterThan(0);
+    // 翻上去之后看到的是更早的构建日志，不再是最新那几行
+    expect(gridText(scrolled.grid)).toContain("[build] step");
+    expect(gridText(scrolled.grid)).not.toContain("14 tests passed");
+  });
+
+  it("回到底部：连按 pagedown 直到画面不再变化", async () => {
+    const harness = await createHarness();
+    const cookie = await harness.loginCookie();
+    const scroll = (action: string) =>
+      harness.request("/api/surfaces/sf-11/scroll", { method: "POST", cookie, body: JSON.stringify({ action }) });
+
+    await scroll("pageup");
+    await scroll("pageup");
+    const back = (await (await scroll("bottom")).json()) as SurfaceScrollResponse;
+
+    expect(back.grid.scrolledRows).toBe(0);
+    expect(gridText(back.grid)).toContain("14 tests passed");
+  });
+
+  it("不认识的翻页动作是 400", async () => {
+    const harness = await createHarness();
+    const cookie = await harness.loginCookie();
+    const response = await harness.request("/api/surfaces/sf-11/scroll", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ action: "ctrl+c" }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("GET /history 去掉与网格重叠的部分，只给更早的内容", async () => {
+    const harness = await createHarness();
+    const cookie = await harness.loginCookie();
+    const grid = (await (await harness.request("/api/surfaces/sf-11/grid", { cookie })).json()) as SurfaceGrid;
+    const drop = grid.scrollbackRows + grid.viewportRows;
+
+    const history = (await (
+      await harness.request(`/api/surfaces/sf-11/history?drop=${drop}`, { cookie })
+    ).json()) as SurfaceHistoryResponse;
+
+    expect(history.droppedTail).toBe(drop);
+    expect(history.text).toContain("[build] step 1/120");
+    // 网格已经画出来的那几行不能再重复一遍
+    expect(history.text).not.toContain("14 tests passed");
+  });
+
+  it("读历史不污染状态推断的基线", async () => {
+    const harness = await createHarness();
+    const cookie = await harness.loginCookie();
+    const before = (await (
+      await harness.request("/api/surfaces/sf-11/output", { cookie })
+    ).json()) as SurfaceSnapshot;
+
+    await harness.request("/api/surfaces/sf-11/history?drop=0", { cookie });
+
+    const after = (await (
+      await harness.request("/api/surfaces/sf-11/output", { cookie })
+    ).json()) as SurfaceSnapshot;
+    // 中间那次读历史如果进了 SnapshotTracker，这里的 revision 会被顶上去
+    expect(after.revision).toBe(before.revision);
   });
 });
 

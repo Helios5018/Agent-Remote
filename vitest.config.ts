@@ -10,7 +10,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["apps/server/test/**/*.test.ts", "packages/*/test/**/*.test.ts"],
+    include: ["apps/server/test/**/*.test.ts", "apps/web/test/**/*.test.ts", "packages/*/test/**/*.test.ts"],
     testTimeout: 15_000,
   },
 });

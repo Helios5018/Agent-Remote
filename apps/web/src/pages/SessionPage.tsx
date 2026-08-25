@@ -1,15 +1,25 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { AgentState } from "@car/protocol";
-import { AGENT_DISPLAY_NAME, STATUS_LABEL } from "@car/protocol";
+import type { AgentState, ScrollAction } from "@car/protocol";
+import { AGENT_DISPLAY_NAME, gridMissingHistoryRows, gridRowCount, STATUS_LABEL } from "@car/protocol";
 import { formatAgo, formatDuration } from "@car/shared";
 import { Composer } from "../components/Composer.tsx";
 import { StatusBadge } from "../components/StatusBadge.tsx";
-import { TerminalGrid, type GridLayout } from "../components/TerminalGrid.tsx";
+import { DEFAULT_GRID_FONT_SIZE, TerminalGrid, type GridLayout } from "../components/TerminalGrid.tsx";
 import { ControlToggle, TopBar } from "../components/TopBar.tsx";
 import { findAgent, findSurface, useAppStore } from "../stores/AppStore.tsx";
+import { usePageGesture } from "../hooks/usePageGesture.ts";
 import type { Route } from "../hooks/useRouter.ts";
 
 const LAYOUT_KEY = "car.session.layout.v1";
+const FONT_KEY = "car.session.font.v1";
+const IMMERSIVE_KEY = "car.session.immersive.v1";
+// fit 模式下这几个值是缩放倍数的分子：7 ≈ 0.56 倍，30 ≈ 2.4 倍
+// （手机上 120 列铺满屏宽只有 5px 高，得能放大到看得清，代价是横向滑动）
+const DEFAULT_FONT_SIZE = DEFAULT_GRID_FONT_SIZE;
+const MIN_FONT_SIZE = 7;
+const MAX_FONT_SIZE = 30;
+/** 每点一下按比例缩放，不然从 12.5 调到 30 要点二十次。 */
+const FONT_STEP = 1.2;
 
 /** Agent 会话页（需求文档 §7）：使用频率最高的页面。 */
 export function SessionPage({
@@ -29,6 +39,8 @@ export function SessionPage({
     subscribe,
     sendInput,
     sendKey,
+    scrollSurface,
+    loadHistory,
     refreshGrid,
     refreshTree,
     session,
@@ -37,8 +49,18 @@ export function SessionPage({
   const [agent, setAgent] = useState<AgentState | null>(() => findAgent(inbox, surfaceId) ?? null);
   const [now, setNow] = useState(() => Date.now());
   const [layoutPref, setLayoutPref] = useState<GridLayout | "auto">(readLayoutPref);
+  const [fontSize, setFontSize] = useState(readFontSize);
+  const [immersive, setImmersive] = useState(readImmersive);
+  const [scrollBusy, setScrollBusy] = useState(false);
+  const [history, setHistory] = useState<{ text: string; truncated: boolean } | null>(null);
+  const [historyBusy, setHistoryBusy] = useState(false);
   const outputRef = useRef<HTMLDivElement | null>(null);
+  const historyRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
+  // 插入历史后要把视线钉在原来的位置，不然内容整块往下窜
+  const keepPositionAfterHistory = useRef(false);
+  // 翻过页就说明这个 surface 现在不在最新一屏，离开时要退回去
+  const scrolledAway = useRef(false);
 
   const liveAgent = findAgent(inbox, surfaceId) ?? agent;
   const placement = findSurface(tree, surfaceId);
@@ -50,11 +72,13 @@ export function SessionPage({
 
   // store 里的函数会随状态刷新而换引用；用 ref 固定住，
   // 否则一旦请求失败就会「失败 → 状态更新 → 重新请求」无限重试。
-  const actionsRef = useRef({ openSession, subscribe, refreshTree, refreshGrid });
-  actionsRef.current = { openSession, subscribe, refreshTree, refreshGrid };
+  const actionsRef = useRef({ openSession, subscribe, refreshTree, refreshGrid, scrollSurface });
+  actionsRef.current = { openSession, subscribe, refreshTree, refreshGrid, scrollSurface };
 
   useEffect(() => {
     let cancelled = false;
+    setHistory(null);
+    scrolledAway.current = false;
     actionsRef.current.subscribe(surfaceId);
     // 直接从 #/s/:id 进来时树还没拉过，标题要靠它。
     void actionsRef.current.refreshTree();
@@ -65,16 +89,21 @@ export function SessionPage({
     return () => {
       cancelled = true;
       actionsRef.current.subscribe(null);
+      // 翻页动的是 Mac 上那块真实画面，离开前退回最新一屏，
+      // 否则本人坐到电脑前会发现终端莫名其妙停在半路。
+      if (scrolledAway.current) void actionsRef.current.scrollSurface(surfaceId, "bottom");
     };
   }, [surfaceId]);
 
   useEffect(() => {
     try {
       window.localStorage.setItem(LAYOUT_KEY, layoutPref);
+      window.localStorage.setItem(FONT_KEY, String(fontSize));
+      window.localStorage.setItem(IMMERSIVE_KEY, immersive ? "1" : "0");
     } catch {
       // 隐私模式写不了，忽略
     }
-  }, [layoutPref]);
+  }, [layoutPref, fontSize, immersive]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -86,13 +115,69 @@ export function SessionPage({
     const element = outputRef.current;
     if (!element || !stickToBottom.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [grid?.revision, layout]);
+  }, [grid?.revision, layout, fontSize]);
+
+  // 历史插在网格上方，会把网格整块顶下去；补上同样的高度，视线才不会跳
+  useLayoutEffect(() => {
+    if (!keepPositionAfterHistory.current) return;
+    keepPositionAfterHistory.current = false;
+    const element = outputRef.current;
+    const block = historyRef.current;
+    if (element && block) element.scrollTop += block.offsetHeight;
+  }, [history]);
+
+  const missingHistory = grid ? gridMissingHistoryRows(grid) : 0;
 
   const onScroll = () => {
     const element = outputRef.current;
     if (!element) return;
     const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
     stickToBottom.current = distance < 40;
+    // 普通屏往上翻到头就自动把更早的历史接上，不用先看见按钮再去点
+    if (element.scrollTop < 48 && missingHistory > 0 && !history && !historyBusy) void loadEarlier();
+  };
+
+  const scrollPage = async (action: ScrollAction) => {
+    if (scrollBusy) return;
+    setScrollBusy(true);
+    try {
+      // 翻页之后网格换了一屏，之前按旧网格裁出来的历史对不上了
+      setHistory(null);
+      scrolledAway.current = action !== "bottom";
+      stickToBottom.current = true;
+      await scrollSurface(surfaceId, action);
+    } finally {
+      setScrollBusy(false);
+    }
+  };
+
+  // 全屏 TUI 一屏就是全部，浏览器根本没有可滚的区域 —— 滑到边继续滑就翻页
+  const { dragOffset, armed } = usePageGesture({
+    scrollerRef: outputRef,
+    enabled: grid?.altScreen === true,
+    busy: scrollBusy,
+    onPage: (direction) => void scrollPage(direction === "up" ? "pageup" : "pagedown"),
+  });
+
+  const zoomFont = (factor: number) =>
+    setFontSize((size) =>
+      Math.round(Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size * factor)) * 10) / 10,
+    );
+
+  const loadEarlier = async () => {
+    if (!grid || historyBusy) return;
+    // 人都翻到最上面了，别再让新输出把画面拽回底部
+    stickToBottom.current = false;
+    setHistoryBusy(true);
+    try {
+      const result = await loadHistory(surfaceId, gridRowCount(grid));
+      if (result) {
+        keepPositionAfterHistory.current = true;
+        setHistory({ text: result.text, truncated: result.truncated });
+      }
+    } finally {
+      setHistoryBusy(false);
+    }
   };
 
   // 主标题用 surface 名，workspace 名放到副标题里做归属说明。
@@ -114,7 +199,7 @@ export function SessionPage({
         : "";
 
   return (
-    <div className="page session-page">
+    <div className={`page session-page${immersive ? " immersive" : ""}`}>
       <TopBar title={title} subtitle={surfaceRef} onBack={back} right={<ControlToggle />} />
 
       <div className="session-header">
@@ -142,25 +227,120 @@ export function SessionPage({
 
       {error ? <div className="banner error">{error}</div> : null}
 
+      {/* 翻页手势的状态提示，浮在终端上方，不占布局高度 */}
+      {armed || scrollBusy ? (
+        <div className="page-hint">
+          {scrollBusy ? "翻页中…" : armed === "up" ? "松手看上一屏" : "松手看下一屏"}
+        </div>
+      ) : null}
+
       <div className="output" ref={outputRef} onScroll={onScroll}>
-        {grid ? (
-          <TerminalGrid grid={grid} layout={layout} />
-        ) : (
-          <div className="output-empty dim">（正在读取终端画面…）</div>
-        )}
+        <div
+          className={`output-drag${dragOffset === 0 ? "" : " dragging"}`}
+          style={dragOffset === 0 ? undefined : { transform: `translateY(${dragOffset}px)` }}
+        >
+          {grid ? (
+            <>
+              {/* 网格之外更早的历史：纯文本、无颜色，cmux 那一层就没给。 */}
+              {history ? (
+                <div className="history-block" ref={historyRef}>
+                  {history.truncated ? (
+                    <div className="history-note dim">（更早的内容已超出回溯上限）</div>
+                  ) : null}
+                  <pre className="history-text">{history.text}</pre>
+                  <div className="history-divider">
+                    <span>以上为纯文本历史 · 以下为实时画面</span>
+                  </div>
+                </div>
+              ) : missingHistory > 0 ? (
+                <div className="history-block" ref={historyRef}>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    disabled={historyBusy}
+                    onClick={() => void loadEarlier()}
+                  >
+                    {historyBusy ? "读取中…" : `加载更早的历史（约 ${missingHistory} 行，纯文本）`}
+                  </button>
+                </div>
+              ) : null}
+
+              <TerminalGrid grid={grid} layout={layout} baseFontSize={fontSize} />
+            </>
+          ) : (
+            <div className="output-empty dim">（正在读取终端画面…）</div>
+          )}
+        </div>
       </div>
 
       <div className="session-tools">
-        <button type="button" className="ghost-button" onClick={() => void refreshGrid(surfaceId)}>
-          手动刷新
-        </button>
+        {/*
+          翻页只给全屏 TUI 用：它的历史在程序自己手里，终端这层一行 scrollback 都没有。
+          普通屏有真正的回滚，往上翻看「加载更早的历史」就够了，
+          而且实测普通屏里跑的 CLI 未必理会 pageup，摆个点不动的按钮更糟。
+        */}
+        {grid?.altScreen ? (
+          <div className="session-scroll-group">
+            <button
+              type="button"
+              className="chip-button"
+              title="上一屏（也可以直接往下滑）。让终端里的程序自己往回翻，Mac 上那块画面会跟着动，离开会话时自动回到最新"
+              disabled={scrollBusy}
+              onClick={() => void scrollPage("pageup")}
+            >
+              ▲ 上一屏
+            </button>
+            <button
+              type="button"
+              className="chip-button"
+              title="下一屏（也可以直接往上滑）"
+              disabled={scrollBusy}
+              onClick={() => void scrollPage("pagedown")}
+            >
+              ▼ 下一屏
+            </button>
+            <button
+              type="button"
+              className="chip-button"
+              title="回到最新一屏"
+              disabled={scrollBusy}
+              onClick={() => void scrollPage("bottom")}
+            >
+              ⤓ 最新
+            </button>
+          </div>
+        ) : (
+          <span className="dim">{missingHistory > 0 ? "更早的内容在画面上方" : ""}</span>
+        )}
+
         <div className="session-tools-right">
           {grid ? (
             <span className="dim mono">
               {grid.columns}×{grid.viewportRows}
               {grid.altScreen ? " · TUI" : ""}
+              {grid.scrolledRows > 0 ? ` · ↑${grid.scrolledRows}` : ""}
             </span>
           ) : null}
+          <div className="session-font-group">
+            <button
+              type="button"
+              className="chip-button"
+              title="缩小（TUI 下是整屏缩放，一屏能塞下更多行）"
+              disabled={fontSize <= MIN_FONT_SIZE}
+              onClick={() => zoomFont(1 / FONT_STEP)}
+            >
+              A−
+            </button>
+            <button
+              type="button"
+              className="chip-button"
+              title="放大（TUI 下超过屏宽就横向滑动看）"
+              disabled={fontSize >= MAX_FONT_SIZE}
+              onClick={() => zoomFont(FONT_STEP)}
+            >
+              A+
+            </button>
+          </div>
           <button
             type="button"
             className="chip-button"
@@ -179,11 +359,23 @@ export function SessionPage({
           >
             {layoutPref === "auto" ? "自动" : layoutPref === "fit" ? "缩放" : "换行"}
           </button>
+          <button
+            type="button"
+            className="chip-button"
+            title={immersive ? "退出沉浸模式" : "沉浸模式：收起标题和状态栏，把屏幕都留给终端"}
+            onClick={() => setImmersive((current) => !current)}
+          >
+            {immersive ? "⤡ 退出" : "⤢ 沉浸"}
+          </button>
+          <button type="button" className="chip-button" onClick={() => void refreshGrid(surfaceId)}>
+            刷新
+          </button>
         </div>
       </div>
 
       <Composer
         disabled={!controlMode}
+        collapsible={immersive}
         onSend={async (text, submit) => {
           await sendInput(surfaceId, text, submit);
           await refreshGrid(surfaceId);
@@ -205,4 +397,22 @@ function readLayoutPref(): GridLayout | "auto" {
     // 读不到就用自动
   }
   return "auto";
+}
+
+function readFontSize(): number {
+  try {
+    const saved = Number(window.localStorage.getItem(FONT_KEY));
+    if (Number.isFinite(saved) && saved >= MIN_FONT_SIZE && saved <= MAX_FONT_SIZE) return saved;
+  } catch {
+    // 读不到就用默认字号
+  }
+  return DEFAULT_FONT_SIZE;
+}
+
+function readImmersive(): boolean {
+  try {
+    return window.localStorage.getItem(IMMERSIVE_KEY) === "1";
+  } catch {
+    return false;
+  }
 }

@@ -61,7 +61,7 @@ bun run start -- --unlock            # 自己输错被锁了，解锁
 |------|------|
 | **首页**（`#/`） | 按 cmux 结构展开的 Agent 总览 |
 | **单 Workspace**（`#/w/:workspaceId`） | 首页的深链，只展开某一个 workspace（`#/w/all` 等于首页） |
-| **Agent 会话**（`#/s/:surfaceId`） | 使用频率最高：看最近输出、发 Prompt、发控制键 |
+| **Agent 会话**（`#/s/:surfaceId`） | 使用频率最高：看画面、往回翻历史、发 Prompt、发控制键 |
 
 首页直接按 cmux 的真实层级渲染：
 
@@ -169,6 +169,8 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 | `GET` | `/api/tree` | cmux 完整结构 |
 | `GET` | `/api/surfaces/:surfaceId/output` | 读取输出（纯文本） |
 | `GET` | `/api/surfaces/:surfaceId/grid` | 读取彩色渲染网格 |
+| `GET` | `/api/surfaces/:surfaceId/history` | 网格之外更早的历史（纯文本，`?drop=` 去掉与网格重叠的尾部） |
+| `POST` | `/api/surfaces/:surfaceId/scroll` | `{ action }` 翻页：`pageup` / `pagedown` / `bottom`，响应带回新画面 |
 | `POST` | `/api/surfaces/:surfaceId/input` | `{ text, submit }` 输入内容 |
 | `POST` | `/api/surfaces/:surfaceId/key` | `{ key, confirm }` 发送按键 |
 | `POST` | `/api/hooks/:agent` | Hook 上报（独立 Hook 密钥，仅限本机回环） |
@@ -176,6 +178,11 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 
 允许的按键：`enter` `escape` `tab` `up` `down` `left` `right` `ctrl+c`。
 按键条在手机上是单行横滑的。不提供 `ctrl+d`：实测对着 shell 发 EOF 会直接把 surface 关掉。
+
+`/scroll` 是唯一**只读模式也放行**的写向接口：翻页不往终端里写内容，只是让终端里的程序
+换一屏来画，把它挡在控制模式后面等于「想回看历史先解锁」，不值当。它也不收 `home` / `end`
+—— 那两个键 cmux 虽然认，但对 Claude Code 画面纹丝不动，对 shell 又变成移动光标。
+`bottom` 没有对应按键，是服务端连按 `pagedown` 直到画面不再变化（最多 12 步）。
 
 ### 终端画面怎么还原的
 
@@ -202,8 +209,39 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 - 全屏 TUI → 整屏等比缩放到容器宽度，边框严格对齐
 - 普通输出 → 按容器宽度软换行，手机上正常读
 - 会话页右下角可在 `自动 / 缩放 / 换行` 之间切换，选择会记住
+- `A− / A+` 调字号；TUI 下它是**缩放倍数**（1.0 = 正好铺满屏宽）。120 列铺满 iPhone
+  屏宽只有 5 px 高，根本读不了，所以允许放大到看得清，代价是横向滑动看完一行
+- `⤢ 沉浸` 收起标题栏和输入区（输入区变成一条，点开才展开），把屏幕都留给终端
 
 只有**正在查看**的 surface 读网格；后台状态推断仍走便宜的纯文本。
+
+### 怎么往回看
+
+一屏只有 62 行，往回翻这件事分两种情况，因为 cmux 那一层给的东西就不一样：
+
+| | 普通屏（shell、Codex CLI…） | 全屏 TUI（Claude Code、Grok…） |
+|---|---|---|
+| `terminal.replay` | 回滚固定给最近 **240 行** | `scrollback_rows` 恒为 **0** |
+| `read-screen --scrollback` | 能拿到**全部** history（实测 1069 行） | 仍然只有当前一屏 |
+| 怎么回看更早 | 「加载更早的历史」按钮 | 「▲ 上一屏」让 TUI 自己翻 |
+
+- **普通屏**：正常往上滚，滚到头**自动**把更早的历史接上（也可以点那颗按钮）。
+  这一段没有颜色 —— cmux 在 plain text 那一层就把样式丢了；插入时会补回等高的
+  滚动量，视线不会跳。它走独立的 `readHistory`，**不进 SnapshotTracker**：
+  一次性把上千行灌进快照，「输出有没有变化」的判断会全乱。
+- **全屏 TUI**：历史在程序自己手里，终端一行 scrollback 都没有，只能发 `pageup`
+  让它重画更早的一屏。所以翻页按钮**只在 TUI 会话显示** —— 普通屏里跑的 CLI
+  未必理会 `pageup`，摆个点了不动的按钮更糟。
+  代价是这会同步滚动 Mac 上那块真实画面，所以离开会话时自动发一次 `bottom` 复位。
+
+**翻页手势**：TUI 会话不用去够按钮 —— 滑到边界继续滑就翻页。手指拖动时画面跟手位移
+（带阻尼，上限 96px），拖过 64px 顶部出现「松手看上一屏」，松手才真的翻；桌面滚轮累计
+110px 触发一次，中途换方向立刻清零。两次翻页之间至少隔 280ms，免得惯性滚动把 TUI 冲过头。
+
+为什么是「翻一屏」而不是跟手连续滚动：cmux 没有按行滚动的接口。`terminal.replay` 只吃
+`surface_id`，`terminal.scroll` / `terminal.mouse` 这两个未公开方法实测是空壳（不校验参数、
+画面纹丝不动），滚轮事件也转发不过去。能用的只有 `pageup` / `pagedown` 两个按键，
+所以这里把整屏跳变包装成翻页手势 —— 至少让「跳了一屏」是用户自己按出来的。
 
 WebSocket `/ws`：
 

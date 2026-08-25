@@ -441,6 +441,8 @@ body {
 
 .session-page {
   height: 100%;
+  /* 翻页提示要浮在终端上，不能占布局高度 */
+  position: relative;
 }
 
 .session-header {
@@ -484,14 +486,92 @@ body {
   min-height: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+  /* 滑到边界继续滑是翻页手势，别让浏览器顺手去弹整个页面 */
+  overscroll-behavior: contain;
   margin: 0;
   padding: 10px 12px;
   background: #0d1014;
 }
 
+/* 翻页手势：拖动时画面跟手，松手弹回原位 */
+.output-drag {
+  transition: transform 0.18s ease-out;
+}
+
+.output-drag.dragging {
+  transition: none;
+}
+
+.page-hint {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  transform: translateX(-50%);
+  /* 贴在终端区顶部，盖住画面最上面一行 */
+  margin-top: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 12px;
+  pointer-events: none;
+}
+
 .output-empty {
   padding: 20px 2px;
   font-size: 13px;
+}
+
+/* 沉浸模式：标题、状态、留白全收起来，屏幕尽量都给终端 */
+.session-page.immersive .session-header {
+  display: none;
+}
+
+.session-page.immersive .output {
+  padding: 4px 6px;
+}
+
+.session-page.immersive .session-tools {
+  padding: 4px 8px;
+}
+
+/* ---------- 网格之外更早的历史（纯文本） ---------- */
+
+.history-block {
+  margin-bottom: 10px;
+}
+
+.history-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.history-note {
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.history-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.history-divider::before,
+.history-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 
 /* ---------- 终端渲染网格 ---------- */
@@ -545,19 +625,35 @@ body {
   min-height: 1.32em;
 }
 
-.session-tools-right {
+.session-tools-right,
+.session-scroll-group,
+.session-font-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex: none;
 }
 
 .session-tools {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 6px 14px;
   border-top: 1px solid var(--border);
   font-size: 12px;
+  /* 手机上一行放不下这么多按钮，横滑比换行省高度 */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.session-tools::-webkit-scrollbar {
+  display: none;
+}
+
+.chip-button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* ---------- 输入区 ---------- */
@@ -572,6 +668,35 @@ body {
   font-size: 12px;
   color: var(--text-dim);
   margin-bottom: 8px;
+}
+
+/* 沉浸模式下输入区先收成一条，点开才展开 */
+.composer-collapsed {
+  padding: 6px 12px calc(6px + var(--safe-bottom));
+}
+
+.composer-expand {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0d1014;
+  color: var(--text-dim);
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.composer-collapse {
+  display: block;
+  margin: 0 0 8px auto;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .danger-hint {

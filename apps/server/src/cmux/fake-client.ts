@@ -1,4 +1,4 @@
-import type { CmuxKey, CmuxTree, GridSpan, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
+import type { CmuxKey, CmuxTree, GridSpan, ScrollKey, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
 import type { CmuxClient, ReadSurfaceOptions } from "./client.ts";
 import { SnapshotTracker } from "./output.ts";
 
@@ -16,6 +16,8 @@ export interface FakeSurfaceSpec {
   agent: "claude" | "codex" | "grok" | null;
   pid?: number;
   content: string;
+  /** 视口之上更早的历史，用来演示翻页与「加载更早的历史」。 */
+  history?: string;
 }
 
 export interface FakeWorkspaceSpec {
@@ -28,8 +30,11 @@ export interface FakeWorkspaceSpec {
 export class FakeCmuxClient implements CmuxClient {
   readonly sentText: Array<{ surfaceId: string; text: string }> = [];
   readonly sentKeys: Array<{ surfaceId: string; key: CmuxKey }> = [];
+  readonly sentScrolls: Array<{ surfaceId: string; key: ScrollKey }> = [];
   private readonly snapshots = new SnapshotTracker();
   private readonly gridRevisions = new Map<string, { content: string; revision: number }>();
+  /** surfaceId → 当前上滚了多少行，模拟翻页。 */
+  private readonly scrollOffsets = new Map<string, number>();
   available = true;
 
   constructor(
@@ -95,19 +100,24 @@ export class FakeCmuxClient implements CmuxClient {
   async readGrid(surfaceId: string): Promise<SurfaceGrid> {
     const surface = this.findSurface(surfaceId);
     if (!surface) throw new Error(`surface not found: ${surfaceId}`);
-    const lines = surface.content.split("\n");
+    const full = this.fullLines(surface);
+    const viewportRows = surface.content.split("\n").length;
+    // 和真实终端一样：视口是缓冲区末尾的一个窗口，翻页只是把窗口往上挪
+    const offset = this.clampOffset(surfaceId, full.length - viewportRows);
+    const lines = full.slice(full.length - viewportRows - offset, full.length - offset);
     const spans: GridSpan[] = lines.map((line, row) => [row, 0, line.startsWith(">") ? 1 : 0, line, line.length]);
     // 和真实实现一样：内容没变 revision 就不动，否则「没变化不推送」的逻辑没法验证
+    const shown = lines.join("\n");
     const last = this.gridRevisions.get(surfaceId);
-    const revision =
-      last && last.content === surface.content ? last.revision : (last?.revision ?? 0) + 1;
-    this.gridRevisions.set(surfaceId, { content: surface.content, revision });
+    const revision = last && last.content === shown ? last.revision : (last?.revision ?? 0) + 1;
+    this.gridRevisions.set(surfaceId, { content: shown, revision });
     return {
       surfaceId,
       columns: Math.max(20, ...lines.map((line) => line.length)),
-      viewportRows: lines.length,
+      viewportRows,
       scrollbackRows: 0,
-      historyRows: 0,
+      historyRows: full.length - viewportRows,
+      scrolledRows: offset,
       altScreen: false,
       foreground: "#d8dee9",
       background: "#0d1014",
@@ -117,6 +127,13 @@ export class FakeCmuxClient implements CmuxClient {
       revision,
       fetchedAt: this.now(),
     };
+  }
+
+  async readHistory(surfaceId: string, lines: number): Promise<string> {
+    const surface = this.findSurface(surfaceId);
+    if (!surface) throw new Error(`surface not found: ${surfaceId}`);
+    const full = this.fullLines(surface);
+    return full.slice(Math.max(0, full.length - lines)).join("\n");
   }
 
   async sendText(surfaceId: string, text: string): Promise<void> {
@@ -132,7 +149,30 @@ export class FakeCmuxClient implements CmuxClient {
     this.sentKeys.push({ surfaceId, key });
   }
 
+  async scrollSurface(surfaceId: string, key: ScrollKey): Promise<void> {
+    const surface = this.findSurface(surfaceId);
+    if (!surface) throw new Error(`surface not found: ${surfaceId}`);
+    this.sentScrolls.push({ surfaceId, key });
+    const viewportRows = surface.content.split("\n").length;
+    const maxOffset = Math.max(0, this.fullLines(surface).length - viewportRows);
+    const current = this.scrollOffsets.get(surfaceId) ?? 0;
+    const next = key === "pageup" ? current + viewportRows : current - viewportRows;
+    this.scrollOffsets.set(surfaceId, Math.min(maxOffset, Math.max(0, next)));
+  }
+
   // ---- 测试辅助 ----
+
+  /** 历史 + 当前内容，就是这个 surface 的完整缓冲区。 */
+  private fullLines(surface: FakeSurfaceSpec): string[] {
+    const history = surface.history ? surface.history.split("\n") : [];
+    return [...history, ...surface.content.split("\n")];
+  }
+
+  private clampOffset(surfaceId: string, maxOffset: number): number {
+    const offset = Math.min(Math.max(0, maxOffset), this.scrollOffsets.get(surfaceId) ?? 0);
+    this.scrollOffsets.set(surfaceId, offset);
+    return offset;
+  }
 
   findSurface(surfaceId: string): FakeSurfaceSpec | undefined {
     for (const workspace of this.workspaces) {
@@ -189,6 +229,8 @@ export function defaultWorkspaces(): FakeWorkspaceSpec[] {
               agent: "codex",
               pid: 51002,
               content: "Running pnpm test...\n\n14 tests passed\n2 tests failed",
+              // 给 demo 一段更早的历史，翻页和「加载更早的历史」才有东西可看
+              history: Array.from({ length: 120 }, (_, i) => `[build] step ${i + 1}/120 done`).join("\n"),
             },
           ],
         },
