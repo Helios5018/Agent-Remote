@@ -21,6 +21,13 @@ bun run dev:web               # 前端 :4319，代理到 :4318
 
 技术栈：Bun + Hono + SQLite / React 18 + Vite / Zod；bun workspaces。
 
+### 运行中更新
+
+- 服务已经运行且代码有改动时，优先原地更新：复用原端口、tmux session 和外部入口，不要无故另起一套服务。
+- 公网 Agent Remote 使用 `bash .agents/skills/launch-public/scripts/launch-public.sh refresh`。该动作先构建，再重启 `agent-remote-web`，并尽量保留端口 `4318`、Sealtun tunnel、公网 URL 和 Access PIN。
+- 不要为了发布代码而停止或清理 Sealtun 隧道；只有原入口确实无法复用时才创建新入口，并明确告知地址变化。
+- 更新完成后验证本地与公网均可访问；前端有改动时，确认公网资源哈希与本地 `apps/web/dist/index.html` 一致。
+
 ## 目录
 
 ```

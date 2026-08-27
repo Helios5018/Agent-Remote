@@ -217,6 +217,16 @@ export function HomePage({
         <button type="button" className="chip-button" onClick={toggleAll}>
           {anyExpanded ? "全部折叠" : "全部展开"}
         </button>
+        <button
+          type="button"
+          className="chip-button"
+          onClick={() => {
+            void refreshInbox();
+            void refreshTree();
+          }}
+        >
+          手动刷新
+        </button>
       </div>
 
       <div className="scroll-area">
@@ -238,23 +248,13 @@ export function HomePage({
           navigate={navigate}
         />
 
-        <div className="footer-actions">
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => {
-              void refreshInbox();
-              void refreshTree();
-            }}
-          >
-            手动刷新
-          </button>
-          {workspaceId ? (
+        {workspaceId ? (
+          <div className="footer-actions">
             <button type="button" className="ghost-button" onClick={() => navigate({ name: "inbox" })}>
               查看全部 workspace
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

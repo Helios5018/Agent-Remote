@@ -24,7 +24,7 @@ need() {
 }
 
 http_code() {
-  curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${PORT}/" 2>/dev/null || echo "000"
+  curl -sS -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${PORT}/" 2>/dev/null || true
 }
 
 local_up() {
@@ -54,6 +54,17 @@ wait_local() {
       return 0
     fi
     sleep 0.5
+  done
+  return 1
+}
+
+wait_local_down() {
+  local i
+  for i in $(seq 1 20); do
+    if ! local_up; then
+      return 0
+    fi
+    sleep 0.25
   done
   return 1
 }
@@ -111,6 +122,27 @@ ensure_server() {
   fi
 }
 
+refresh_server() {
+  echo "building latest Agent Remote" >&2
+  bun run build >&2
+
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    echo "restarting tmux session ${SESSION} in place" >&2
+    tmux kill-session -t "$SESSION"
+    wait_local_down || die "停止 ${SESSION} 后 :${PORT} 仍被占用；为避免误杀未知进程，已停止原地刷新"
+  elif local_up; then
+    die ":${PORT} 正在运行，但不属于 tmux ${SESSION}；为避免误杀未知进程，已停止原地刷新"
+  fi
+
+  # 原地更新保留数据库中的现有 PIN；仅首次公网拉起时轮换 PIN。
+  tmux new-session -d -s "$SESSION" -c "$ROOT" \
+    "bun run start -- --trust-proxy --pin-length 6"
+
+  if ! wait_local; then
+    die "服务原地刷新超时：tmux capture-pane -pt ${SESSION} -S -80"
+  fi
+}
+
 ensure_tunnel() {
   local info status id
   if info="$(find_tunnel)"; then
@@ -158,8 +190,8 @@ if [[ "$ACTION" == "stop" ]]; then
   exit 0
 fi
 
-if [[ "$ACTION" != "start" ]]; then
-  die "未知参数：${ACTION}（只用 start / stop）"
+if [[ "$ACTION" != "start" && "$ACTION" != "refresh" ]]; then
+  die "未知参数：${ACTION}（只用 start / refresh / stop）"
 fi
 
 sealtun_logged_in || die "sealtun 未登录。先在本机执行 sealtun login，完成浏览器授权后再跑。"
@@ -174,7 +206,11 @@ if [[ ! -f apps/web/dist/index.html ]]; then
   bun run build >&2
 fi
 
-ensure_server
+if [[ "$ACTION" == "refresh" ]]; then
+  refresh_server
+else
+  ensure_server
+fi
 TUNNEL="$(ensure_tunnel)"
 PIN="$(read_pin)"
 [[ -n "$PIN" ]] || die "读不到 Access PIN（${DB} 里没有 access_pin）"
