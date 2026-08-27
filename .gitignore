@@ -11,6 +11,7 @@ dist/
 *.db-shm
 *.db-wal
 .cmux-agent-remote/
+.sealtun/
 
 # 备份文件
 *.bak
