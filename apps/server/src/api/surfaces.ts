@@ -1,15 +1,19 @@
 import { Hono, type Context } from "hono";
 import {
+  CreateSurfaceRequestSchema,
   isDangerousKey,
   SurfaceInputRequestSchema,
   SurfaceKeyRequestSchema,
   SurfaceScrollRequestSchema,
+  type CmuxPane,
+  type CreateSurfaceResponse,
   type ScrollKey,
   type SurfaceGrid,
   type SurfaceWriteResponse,
 } from "@car/protocol";
 import { apiError, type AppContext } from "../context.ts";
 import { CmuxError } from "../cmux/client.ts";
+import { resolvePaneCwd } from "../cmux/cwd.ts";
 import { requireControl, type Env } from "../security/middleware.ts";
 import { safeJson } from "./auth.ts";
 
@@ -19,6 +23,66 @@ import { safeJson } from "./auth.ts";
  */
 export function createSurfaceRoutes(ctx: AppContext) {
   const app = new Hono<Env>();
+
+  /**
+   * 在指定 pane 里新建一个 terminal surface，可选顺手起一个 Agent。
+   *
+   * 挂在集合根上而不是 /:surfaceId/xxx —— 建之前还没有 surface。
+   * 但「写操作必须显式指定目标」的规矩照旧：paneId 必填，且必须在当前拓扑里真实存在。
+   */
+  app.post("/", requireControl(ctx), async (c) => {
+    const parsed = CreateSurfaceRequestSchema.safeParse(await safeJson(c.req.raw));
+    if (!parsed.success) return c.json(apiError("BAD_REQUEST", "参数不合法"), 400);
+    const { paneId, workspaceId, launch } = parsed.data;
+
+    let created: CreateSurfaceResponse;
+    try {
+      // 先在拓扑里核对一遍：不认识的 pane 直接挡掉，不要把随手传的字符串丢给 CLI。
+      const tree = await ctx.client.getTree();
+      const found = findPane(tree.workspaces, paneId, workspaceId);
+      if (!found) return c.json(apiError("NOT_FOUND", `pane 不存在: ${paneId}`), 404);
+
+      const cwd = (await (ctx.paneCwd ?? resolvePaneCwd)(found.pane)) ?? undefined;
+      const surface = await ctx.client.createSurface({
+        paneId: found.pane.id ?? found.pane.ref,
+        workspaceId: found.workspaceId,
+        cwd,
+      });
+
+      if (launch) {
+        // 新 shell 刚被唤醒，还在跑 .zshrc；太早打字有可能被吞掉。
+        await sleep(LAUNCH_DELAY_MS);
+        // 命令来自服务端白名单，前端只能选 claude/codex/grok。
+        await ctx.client.sendText(surface.surfaceId, ctx.config.launchCommands[launch]);
+        await ctx.client.sendKey(surface.surfaceId, "enter");
+      }
+
+      created = {
+        ok: true,
+        surfaceId: surface.surfaceId,
+        surfaceRef: surface.surfaceRef,
+        paneId: surface.paneId ?? found.pane.id,
+        workspaceId: surface.workspaceId ?? found.workspaceId,
+        cwd: cwd ?? null,
+        launched: launch,
+        // 和 input / key 一样带回续期后的到期时间，前端的 CONTROL 倒计时才跟得上。
+        controlModeExpiresAt: writeResponse(ctx, c).controlModeExpiresAt,
+      };
+    } catch (error) {
+      return handleCmuxError(c, error);
+    }
+
+    ctx.store.audit({
+      at: ctx.now(),
+      action: "surface.create",
+      surfaceId: created.surfaceId,
+      detail: `pane=${paneId} launch=${launch ?? "none"} cwd=${created.cwd ?? "default"}`,
+    });
+    // 新 tab 里可能已经在起 Agent，尽快让它进入轮询和状态推断。
+    ctx.poller?.scheduleImmediate(created.surfaceId);
+
+    return c.json(created, 201);
+  });
 
   app.get("/:surfaceId/output", async (c) => {
     const surfaceId = c.req.param("surfaceId");
@@ -166,6 +230,21 @@ function writeResponse(ctx: AppContext, c: Context<Env>): SurfaceWriteResponse {
   };
 }
 
+/** 按 UUID 或 pane:N 短引用找 pane；短引用会重复，所以带 workspace 时先缩范围。 */
+function findPane(
+  workspaces: Array<{ id: string; ref: string; panes: CmuxPane[] }>,
+  paneId: string,
+  workspaceId?: string,
+): { pane: CmuxPane; workspaceId: string } | null {
+  for (const workspace of workspaces) {
+    if (workspaceId && workspace.id !== workspaceId && workspace.ref !== workspaceId) continue;
+    for (const pane of workspace.panes) {
+      if (pane.id === paneId || pane.ref === paneId) return { pane, workspaceId: workspace.id };
+    }
+  }
+  return null;
+}
+
 /** 翻一屏，等 TUI 重绘完再截图 —— 读太快会拿到翻页前的旧画面。 */
 async function scrollOnce(ctx: AppContext, surfaceId: string, key: ScrollKey): Promise<SurfaceGrid> {
   await ctx.client.scrollSurface(surfaceId, key);
@@ -192,6 +271,9 @@ async function scrollToBottom(ctx: AppContext, surfaceId: string): Promise<Surfa
 
 const SCROLL_TO_BOTTOM_MAX_STEPS = 12;
 
+/** 新建 surface 后等 shell 初始化完再敲启动命令。 */
+const LAUNCH_DELAY_MS = 150;
+
 function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
   const value = Number(raw);
   if (!Number.isFinite(value)) return fallback;
@@ -204,7 +286,9 @@ function sleep(ms: number): Promise<void> {
 
 function handleCmuxError(c: { json: (body: unknown, status?: 400 | 404 | 500 | 503) => Response }, error: unknown) {
   if (error instanceof CmuxError) {
-    if (error.code === "SURFACE_NOT_FOUND") return c.json(apiError("NOT_FOUND", error.message), 404);
+    if (error.code === "SURFACE_NOT_FOUND" || error.code === "PANE_NOT_FOUND") {
+      return c.json(apiError("NOT_FOUND", error.message), 404);
+    }
     return c.json(apiError("CMUX_UNAVAILABLE", error.message), 503);
   }
   return c.json(apiError("INTERNAL", "cmux 操作失败"), 500);

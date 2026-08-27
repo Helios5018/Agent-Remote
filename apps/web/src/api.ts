@@ -1,6 +1,8 @@
 import type {
   AgentDetailResponse,
+  AgentKind,
   CmuxKey,
+  CreateSurfaceResponse,
   Inbox,
   ScrollAction,
   SessionInfo,
@@ -73,6 +75,13 @@ export const api = {
 
   /** 彩色渲染网格（颜色 / 粗体 / 反显 / 光标 / 格子宽度）。 */
   grid: (surfaceId: string) => request<SurfaceGrid>(`/api/surfaces/${encodeURIComponent(surfaceId)}/grid`),
+
+  /** 在指定 pane 里新建 terminal surface，launch 非 null 时顺手起一个 Agent。 */
+  createSurface: (paneId: string, workspaceId: string | undefined, launch: AgentKind | null) =>
+    request<CreateSurfaceResponse>("/api/surfaces", {
+      method: "POST",
+      body: JSON.stringify({ paneId, workspaceId, launch }),
+    }),
 
   sendInput: (surfaceId: string, text: string, submit: boolean) =>
     request<SurfaceWriteResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/input`, {

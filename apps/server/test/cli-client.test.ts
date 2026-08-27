@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { CmuxCliClient } from "../src/cmux/cli-client.ts";
 import { CmuxError } from "../src/cmux/client.ts";
-import { buildSendKeyArgs, buildSendTextArgs, assertSurfaceTarget } from "../src/cmux/control.ts";
+import {
+  assertPaneTarget,
+  assertSurfaceTarget,
+  buildNewSurfaceArgs,
+  buildSendKeyArgs,
+  buildSendTextArgs,
+} from "../src/cmux/control.ts";
 import type { CommandRunner } from "../src/cmux/exec.ts";
 import { RAW_READ_SCREEN, RAW_TOP, RAW_TREE } from "./fixtures.ts";
 
@@ -168,6 +174,86 @@ describe("写操作必须显式指定 surface（§23.3）", () => {
 
   it("以 - 开头的 prompt 不会被当成 flag", () => {
     expect(buildSendTextArgs("S1", "--help")).toEqual(["send", "--surface", "S1", "--", "--help"]);
+  });
+});
+
+describe("新建 surface", () => {
+  const NEW_SURFACE_JSON = JSON.stringify({
+    pane_id: "PANE-UUID",
+    pane_ref: "pane:27",
+    surface_id: "SURFACE-UUID",
+    surface_ref: "surface:275",
+    type: "terminal",
+    workspace_id: "WS-UUID",
+    workspace_ref: "workspace:15",
+  });
+
+  /** args[0] 是全局选项，makeRunner 按不了子命令，这里自己认。 */
+  function newSurfaceRunner(stdout = NEW_SURFACE_JSON) {
+    const calls: string[][] = [];
+    const runner: CommandRunner = async (args) => {
+      calls.push(args);
+      if (args.includes("new-surface")) return { stdout, stderr: "", code: 0 };
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    return { runner, calls };
+  }
+
+  it("--id-format both 必须在子命令前面，否则拿不到 UUID", () => {
+    expect(buildNewSurfaceArgs({ paneId: "P1", workspaceId: "W1", cwd: "/tmp/a b" })).toEqual([
+      "--id-format",
+      "both",
+      "new-surface",
+      "--json",
+      "--type",
+      "terminal",
+      "--pane",
+      "P1",
+      "--focus",
+      "false",
+      "--workspace",
+      "W1",
+      "--working-directory",
+      "/tmp/a b",
+    ]);
+  });
+
+  it("必须显式指定 pane", () => {
+    expect(() => assertPaneTarget("")).toThrow();
+    expect(() => buildNewSurfaceArgs({ paneId: "   " })).toThrow();
+  });
+
+  it("返回 UUID，并发一次回车唤醒懒启动的 tab", async () => {
+    const { runner, calls } = newSurfaceRunner();
+    const client = new CmuxCliClient({ runner });
+
+    const created = await client.createSurface({ paneId: "PANE-UUID", cwd: "/tmp" });
+    expect(created).toEqual({
+      surfaceId: "SURFACE-UUID",
+      surfaceRef: "surface:275",
+      paneId: "PANE-UUID",
+      workspaceId: "WS-UUID",
+    });
+    // 不唤醒的话新 tab 没有 tty，会话页读画面会直接报错
+    expect(calls).toContainEqual(["send-key", "--surface", "SURFACE-UUID", "--", "enter"]);
+  });
+
+  it("cmux 没给 UUID 就报错，不拿短引用凑数", async () => {
+    const { runner } = newSurfaceRunner(JSON.stringify({ surface_ref: "surface:275" }));
+    const client = new CmuxCliClient({ runner });
+    await expect(client.createSurface({ paneId: "P1" })).rejects.toBeInstanceOf(CmuxError);
+  });
+
+  it("pane 不存在时给出 PANE_NOT_FOUND", async () => {
+    const runner: CommandRunner = async () => ({
+      stdout: "",
+      stderr: "Error: invalid_params: Pane not found",
+      code: 1,
+    });
+    const client = new CmuxCliClient({ runner });
+    await expect(client.createSurface({ paneId: "pane:999" })).rejects.toMatchObject({
+      code: "PANE_NOT_FOUND",
+    });
   });
 });
 

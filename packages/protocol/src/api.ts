@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentStateSchema, InboxSchema } from "./agent.ts";
+import { AgentKindSchema, AgentStateSchema, InboxSchema } from "./agent.ts";
 import { CmuxKeySchema, CmuxTreeSchema, ScrollActionSchema, SurfaceSnapshotSchema } from "./cmux.ts";
 import { SurfaceGridSchema } from "./grid.ts";
 
@@ -44,6 +44,41 @@ export type TreeResponse = z.infer<typeof TreeResponseSchema>;
 /** GET /api/surfaces/:surfaceId/output */
 export const SurfaceOutputResponseSchema = SurfaceSnapshotSchema;
 export type SurfaceOutputResponse = z.infer<typeof SurfaceOutputResponseSchema>;
+
+/**
+ * POST /api/surfaces —— 在指定 pane 里新建一个 surface。
+ *
+ * 只建 terminal：`--type agent-session` 建出来的是 cmux 自己的 Agent 面板，
+ * `read-screen` 报 "Surface is not a terminal"、`terminal.replay` 直接 not_found，
+ * 在这边既看不到画面也发不了输入，等于建了个盲盒。
+ *
+ * `launch` 是白名单枚举而不是自由命令字符串 —— 这个接口开在公网上，
+ * 收任意命令等于送一个远程 shell。
+ */
+export const CreateSurfaceRequestSchema = z.object({
+  /** 目标 pane（UUID 优先，也认 pane:N 短引用）。必填：不存在「当前 pane」这种概念。 */
+  paneId: z.string().min(1).max(128),
+  /** pane 用短引用时需要 workspace 上下文才能定位。 */
+  workspaceId: z.string().min(1).max(128).optional(),
+  /** 建完顺手起哪个 Agent；null 就是一个干净的 shell。 */
+  launch: AgentKindSchema.nullable().default(null),
+});
+export type CreateSurfaceRequest = z.infer<typeof CreateSurfaceRequestSchema>;
+
+export const CreateSurfaceResponseSchema = z.object({
+  ok: z.literal(true),
+  /** 新 surface 的 UUID，可以直接跳会话页。 */
+  surfaceId: z.string(),
+  surfaceRef: z.string(),
+  paneId: z.string().optional(),
+  workspaceId: z.string().optional(),
+  /** 服务端替它选的工作目录；反查不到时为 null（cmux 用自己的默认值）。 */
+  cwd: z.string().nullable(),
+  launched: AgentKindSchema.nullable(),
+  /** 建 surface 也是写操作，同样带回续期后的到期时间（见 SurfaceWriteResponse）。 */
+  controlModeExpiresAt: z.number().optional(),
+});
+export type CreateSurfaceResponse = z.infer<typeof CreateSurfaceResponseSchema>;
 
 /** POST /api/surfaces/:surfaceId/input */
 export const SurfaceInputRequestSchema = z.object({

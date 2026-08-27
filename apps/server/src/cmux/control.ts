@@ -13,6 +13,46 @@ export function assertSurfaceTarget(surfaceId: string | undefined | null): asser
   }
 }
 
+/** 新建 surface 没有 surfaceId 可带，但同样不允许「在当前 pane 建」。 */
+export function assertPaneTarget(paneId: string | undefined | null): asserts paneId is string {
+  if (typeof paneId !== "string" || paneId.trim().length === 0) {
+    throw new Error("新建 surface 必须显式指定 pane");
+  }
+}
+
+export interface NewSurfaceTarget {
+  paneId: string;
+  workspaceId?: string;
+  /** 工作目录。不传的话 cmux 会用一个不可控的默认目录（实测会落到 /tmp）。 */
+  cwd?: string;
+}
+
+/**
+ * 新建 terminal surface。
+ *
+ * `--id-format both` 是全局选项，必须排在子命令前面，
+ * 有它才会在 JSON 里带上 surface UUID —— 短引用 surface:N 重启就变，不能当主键。
+ */
+export function buildNewSurfaceArgs(target: NewSurfaceTarget): string[] {
+  assertPaneTarget(target.paneId);
+  const args = [
+    "--id-format",
+    "both",
+    "new-surface",
+    "--json",
+    "--type",
+    "terminal",
+    "--pane",
+    target.paneId,
+    // 不抢 Mac 上的焦点：从手机上建 tab 不应该把桌面画面切走。
+    "--focus",
+    "false",
+  ];
+  if (target.workspaceId) args.push("--workspace", target.workspaceId);
+  if (target.cwd) args.push("--working-directory", target.cwd);
+  return args;
+}
+
 export function buildSendTextArgs(surfaceId: string, text: string): string[] {
   assertSurfaceTarget(surfaceId);
   // `--` 之后的内容一律当作字面文本，避免 "-r" 之类开头的 prompt 被当成 flag。

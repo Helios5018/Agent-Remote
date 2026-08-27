@@ -375,6 +375,40 @@ body {
   opacity: 0.6;
 }
 
+/* pane 底部的「新建 surface」，缩进与 surface-row 对齐 */
+.pane-new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px 12px;
+}
+
+.pane-new-trigger,
+.pane-new-option,
+.pane-new-cancel {
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 10px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.pane-new.open .pane-new-option {
+  border-style: solid;
+  background: var(--bg-row);
+  color: var(--text);
+}
+
+.pane-new-trigger:disabled,
+.pane-new-option:disabled,
+.pane-new-cancel:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .surface-row {
   display: flex;
   align-items: center;

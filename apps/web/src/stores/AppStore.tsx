@@ -9,8 +9,10 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  AgentKind,
   AgentState,
   CmuxKey,
+  CreateSurfaceResponse,
   CmuxSurface,
   CmuxTree,
   CmuxWorkspace,
@@ -47,6 +49,12 @@ interface AppStoreValue {
   refreshInbox(): Promise<void>;
   refreshTree(): Promise<void>;
   openSession(surfaceId: string): Promise<AgentState | null>;
+  /** 在某个 pane 里新建一个 surface；成功后拓扑已刷新，返回新 surface 的信息。 */
+  createSurface(
+    paneId: string,
+    workspaceId: string | undefined,
+    launch: AgentKind | null,
+  ): Promise<CreateSurfaceResponse | null>;
   subscribe(surfaceId: string | null): void;
   /** 写操作失败会抛出 —— 调用方要据此保住用户没发出去的内容。 */
   sendInput(surfaceId: string, text: string, submit: boolean): Promise<void>;
@@ -270,6 +278,16 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         }
         setInbox((current) => (current ? patchAgent(current, detail.agent) : current));
         return detail.agent;
+      },
+
+      async createSurface(paneId: string, workspaceId: string | undefined, launch: AgentKind | null) {
+        const result = await withError(() => api.createSurface(paneId, workspaceId, launch));
+        if (result) {
+          noteControlRenewed(result.controlModeExpiresAt);
+          // 新 tab 得立刻出现在结构树里，否则跳过去会看到「找不到 surface」。
+          await refreshTree();
+        }
+        return result;
       },
 
       subscribe,

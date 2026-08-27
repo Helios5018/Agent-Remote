@@ -1,3 +1,4 @@
+import type { CmuxPane } from "@car/protocol";
 import type { CmuxClient } from "./cmux/client.ts";
 import type { Poller } from "./realtime/poller.ts";
 import type { RealtimeHub } from "./realtime/hub.ts";
@@ -18,6 +19,11 @@ export interface AppContext {
   throttle: LoginThrottle;
   hub: RealtimeHub;
   poller?: Poller;
+  /**
+   * 新建 surface 时猜工作目录（从同 pane 已有进程反查）。
+   * 默认走 lsof；--demo 和测试里换成不查真实进程的实现。
+   */
+  paneCwd?: (pane: CmuxPane) => Promise<string | null>;
   now: () => number;
 }
 

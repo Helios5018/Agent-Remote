@@ -84,6 +84,8 @@ async function main(): Promise<void> {
     sessions,
     throttle,
     hub,
+    // 假数据里的 tty / pid 都是编的，别拿它们去 lsof。
+    paneCwd: config.demo ? async () => null : undefined,
     now: Date.now,
   };
 

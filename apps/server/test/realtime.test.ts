@@ -174,6 +174,7 @@ describe("Poller 刷新策略（§18）", () => {
       ...client,
       ping: () => client.ping(),
       getTree: () => client.getTree(),
+      createSurface: (options: Parameters<typeof client.createSurface>[0]) => client.createSurface(options),
       sendText: (id: string, text: string) => client.sendText(id, text),
       sendKey: (id: string, key: "enter") => client.sendKey(id, key),
       scrollSurface: (id: string, key: "pageup") => client.scrollSurface(id, key),

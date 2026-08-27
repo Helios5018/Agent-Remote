@@ -1,7 +1,14 @@
 import type { CmuxKey, CmuxTree, ScrollKey, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
 import { createSingleFlight, TtlCache } from "@car/shared";
-import { CmuxError, type CmuxClient, type ReadSurfaceOptions } from "./client.ts";
 import {
+  CmuxError,
+  type CmuxClient,
+  type CreatedSurface,
+  type CreateSurfaceOptions,
+  type ReadSurfaceOptions,
+} from "./client.ts";
+import {
+  buildNewSurfaceArgs,
   buildReadScreenArgs,
   buildReplayArgs,
   buildScrollKeyArgs,
@@ -137,6 +144,42 @@ export class CmuxCliClient implements CmuxClient {
       }
       throw error;
     }
+  }
+
+  async createSurface(options: CreateSurfaceOptions): Promise<CreatedSurface> {
+    const result = await this.runner(buildNewSurfaceArgs(options), { timeoutMs: 10_000 });
+    if (result.code !== 0) {
+      const message = result.stderr.trim();
+      if (/not found|no such|unknown pane|invalid_params/i.test(message)) {
+        throw new CmuxError(`pane 不存在: ${options.paneId}`, "PANE_NOT_FOUND", message);
+      }
+      throw new CmuxError("新建 surface 失败", "CMUX_COMMAND_FAILED", message);
+    }
+
+    const raw = parseJson(result.stdout) as Record<string, unknown> | null;
+    const surfaceId = typeof raw?.["surface_id"] === "string" ? (raw["surface_id"] as string) : "";
+    const surfaceRef = typeof raw?.["surface_ref"] === "string" ? (raw["surface_ref"] as string) : "";
+    if (!surfaceId) {
+      // 没有 UUID 就没法当主键用，宁可报错也不要返回一个会随重启失效的 ref。
+      throw new CmuxError("cmux 没有返回新 surface 的 id", "CMUX_COMMAND_FAILED", result.stdout.slice(0, 200));
+    }
+
+    // cmux 的新 tab 是懒启动的：没被激活过就没有 tty，读画面会报
+    // internal_error: Failed to read terminal text。发一次回车把 shell 拉起来 ——
+    // 回车最干净，只多一行提示符（escape 会在终端里留个 ^[）。
+    try {
+      await this.sendKey(surfaceId, "enter");
+    } catch {
+      // 唤醒失败不回滚：surface 已经建出来了，让用户在会话页里自己敲一下也能起来。
+    }
+
+    this.invalidateTree();
+    return {
+      surfaceId,
+      surfaceRef: surfaceRef || surfaceId,
+      paneId: typeof raw?.["pane_id"] === "string" ? (raw["pane_id"] as string) : undefined,
+      workspaceId: typeof raw?.["workspace_id"] === "string" ? (raw["workspace_id"] as string) : undefined,
+    };
   }
 
   async sendText(surfaceId: string, text: string): Promise<void> {

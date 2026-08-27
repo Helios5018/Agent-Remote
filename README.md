@@ -167,6 +167,7 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 | `GET` | `/api/agents/:surfaceId` | Agent 详情 + 输出快照（并标记已读） |
 | `POST` | `/api/agents/:surfaceId/read` | 显式标记已读 |
 | `GET` | `/api/tree` | cmux 完整结构 |
+| `POST` | `/api/surfaces` | `{ paneId, workspaceId?, launch? }` 在指定 pane 里新建 terminal surface |
 | `GET` | `/api/surfaces/:surfaceId/output` | 读取输出（纯文本） |
 | `GET` | `/api/surfaces/:surfaceId/grid` | 读取彩色渲染网格 |
 | `GET` | `/api/surfaces/:surfaceId/history` | 网格之外更早的历史（纯文本，`?drop=` 去掉与网格重叠的尾部） |
@@ -183,6 +184,24 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 换一屏来画，把它挡在控制模式后面等于「想回看历史先解锁」，不值当。它也不收 `home` / `end`
 —— 那两个键 cmux 虽然认，但对 Claude Code 画面纹丝不动，对 shell 又变成移动光标。
 `bottom` 没有对应按键，是服务端连按 `pagedown` 直到画面不再变化（最多 12 步）。
+
+### 新建 surface
+
+首页每个 pane 底部有「＋ 新建 surface」，可以选 Shell / Claude / Codex / Grok，
+建完直接跳进会话页（Mac 上不会抢焦点）。三条约束：
+
+- **只建 terminal**。`cmux new-surface --type agent-session` 建出来的是 cmux 自己的
+  Agent 面板，`read-screen` 报 "Surface is not a terminal"、`terminal.replay` 直接
+  not_found —— 在这边既看不到画面也发不了输入。要新开一个 Agent，就是建 terminal 再敲命令。
+- **`launch` 是白名单枚举，不是命令字符串**。收任意命令等于在公网上送一个远程 shell。
+  实际执行的命令在服务端配置：默认 `c-d` / `codex-d` / `g-d`（`~/.zshrc` 里带跳过确认参数的别名，
+  手机上没法一路点确认），可用 `CAR_LAUNCH_CLAUDE` / `CAR_LAUNCH_CODEX` / `CAR_LAUNCH_GROK` 覆盖。
+- **`paneId` 必填且要真实存在**。写操作一律显式指定目标，服务端不认「当前 pane」。
+
+两个 cmux 侧的坑已经在 adapter 里处理掉了：新 tab 是**懒启动**的，没被激活过就没有 tty，
+读画面会报 `internal_error: Failed to read terminal text` —— 所以建完先发一次回车把 shell
+拉起来（回车最干净，`escape` 会在终端里留个 `^[`）；工作目录 `tree` / `top` 都不给，
+只能从同 pane 已有进程用 `lsof` 反查 cwd，查不到就不传，由 cmux 用默认目录。
 
 ### 终端画面怎么还原的
 

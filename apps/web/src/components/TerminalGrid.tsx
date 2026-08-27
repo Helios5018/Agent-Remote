@@ -53,7 +53,16 @@ function groupRows(grid: SurfaceGrid): Row[] {
   // 顶部的空行没有信息量，直接裁掉，手机上少滚很多
   let start = 0;
   while (start < rows.length && (rows[start]?.spans.length ?? 0) === 0) start += 1;
-  return rows.slice(start);
+
+  // 尾部同理。这一段对刚建出来的 tab 尤其重要：一个 62 行的空终端只有三行提示符，
+  // 不裁的话页面自动滚到底看到的是一整屏空白，像是画面没加载出来。
+  // 光标所在行要留着，否则看不见光标停在哪。
+  const cursorRow = grid.cursor.visible ? grid.cursor.row : -1;
+  let end = rows.length;
+  while (end > start + 1 && (rows[end - 1]?.spans.length ?? 0) === 0 && rows[end - 1]?.row !== cursorRow) {
+    end -= 1;
+  }
+  return rows.slice(start, end);
 }
 
 /**

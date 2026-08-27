@@ -1,5 +1,10 @@
 import type { CmuxKey, CmuxTree, GridSpan, ScrollKey, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
-import type { CmuxClient, ReadSurfaceOptions } from "./client.ts";
+import type {
+  CmuxClient,
+  CreatedSurface,
+  CreateSurfaceOptions,
+  ReadSurfaceOptions,
+} from "./client.ts";
 import { SnapshotTracker } from "./output.ts";
 
 /**
@@ -31,6 +36,8 @@ export class FakeCmuxClient implements CmuxClient {
   readonly sentText: Array<{ surfaceId: string; text: string }> = [];
   readonly sentKeys: Array<{ surfaceId: string; key: CmuxKey }> = [];
   readonly sentScrolls: Array<{ surfaceId: string; key: ScrollKey }> = [];
+  readonly created: CreateSurfaceOptions[] = [];
+  private nextSurfaceSeq = 0;
   private readonly snapshots = new SnapshotTracker();
   private readonly gridRevisions = new Map<string, { content: string; revision: number }>();
   /** surfaceId → 当前上滚了多少行，模拟翻页。 */
@@ -136,6 +143,29 @@ export class FakeCmuxClient implements CmuxClient {
     return full.slice(Math.max(0, full.length - lines)).join("\n");
   }
 
+  async createSurface(options: CreateSurfaceOptions): Promise<CreatedSurface> {
+    const target = this.findPane(options.paneId);
+    if (!target) throw new Error(`pane not found: ${options.paneId}`);
+    this.created.push(options);
+
+    const seq = (this.nextSurfaceSeq += 1);
+    const surface: FakeSurfaceSpec = {
+      id: `sf-new-${seq}`,
+      ref: `surface:${900 + seq}`,
+      title: "Terminal",
+      agent: null,
+      // 真实实现建完会发一次回车把 shell 拉起来，这里也给一个提示符。
+      content: `➜  ${options.cwd ?? "~"} `,
+    };
+    target.pane.surfaces.push(surface);
+    return {
+      surfaceId: surface.id,
+      surfaceRef: surface.ref,
+      paneId: target.pane.id,
+      workspaceId: target.workspaceId,
+    };
+  }
+
   async sendText(surfaceId: string, text: string): Promise<void> {
     const surface = this.findSurface(surfaceId);
     if (!surface) throw new Error(`surface not found: ${surfaceId}`);
@@ -172,6 +202,15 @@ export class FakeCmuxClient implements CmuxClient {
     const offset = Math.min(Math.max(0, maxOffset), this.scrollOffsets.get(surfaceId) ?? 0);
     this.scrollOffsets.set(surfaceId, offset);
     return offset;
+  }
+
+  findPane(paneId: string): { pane: FakeWorkspaceSpec["panes"][number]; workspaceId: string } | undefined {
+    for (const workspace of this.workspaces) {
+      for (const pane of workspace.panes) {
+        if (pane.id === paneId || pane.ref === paneId) return { pane, workspaceId: workspace.id };
+      }
+    }
+    return undefined;
   }
 
   findSurface(surfaceId: string): FakeSurfaceSpec | undefined {

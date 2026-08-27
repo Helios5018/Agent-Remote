@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AgentState, AttentionGroup, CmuxPane, CmuxSurface, CmuxWorkspace } from "@car/protocol";
+import type {
+  AgentKind,
+  AgentState,
+  AttentionGroup,
+  CmuxPane,
+  CmuxSurface,
+  CmuxWorkspace,
+} from "@car/protocol";
 import {
   AGENT_DISPLAY_NAME,
+  AGENT_KINDS,
   STATUS_GLYPH,
   STATUS_LABEL,
   attentionGroupOf,
@@ -327,8 +335,9 @@ function TreeView({
                           {pane.focused ? <span className="chip chip-now">焦点</span> : null}
                         </button>
                       )}
-                      {paneExpanded
-                        ? surfaces.map((surface) => (
+                      {paneExpanded ? (
+                        <>
+                          {surfaces.map((surface) => (
                             <SurfaceRow
                               key={surface.id}
                               surface={surface}
@@ -336,8 +345,10 @@ function TreeView({
                               now={now}
                               onOpen={() => navigate({ name: "session", surfaceId: surface.id })}
                             />
-                          ))
-                        : null}
+                          ))}
+                          <NewSurfaceRow workspaceId={workspace.id} pane={pane} navigate={navigate} />
+                        </>
+                      ) : null}
                     </div>
                   );
                 })
@@ -347,6 +358,76 @@ function TreeView({
         );
       })}
     </>
+  );
+}
+
+/**
+ * 在这个 pane 里新开一个 tab。
+ *
+ * 只建 terminal：cmux 自己的 agent-session 面板读不到画面，从手机上打开会是一片空白。
+ * 起 Agent 走服务端白名单（Claude / Codex / Grok），这边只能选，不能传命令。
+ * 工作目录由服务端从同 pane 已有进程反查，所以手机上不用打路径。
+ */
+function NewSurfaceRow({
+  workspaceId,
+  pane,
+  navigate,
+}: {
+  workspaceId: string;
+  pane: CmuxPane;
+  navigate: (route: Route) => void;
+}) {
+  const { createSurface, session } = useAppStore();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const controlMode = session?.controlMode === true;
+
+  const create = async (launch: AgentKind | null) => {
+    if (busy) return;
+    setBusy(true);
+    const result = await createSurface(pane.id ?? pane.ref, workspaceId, launch);
+    setBusy(false);
+    setOpen(false);
+    // 建完直接进会话页：新 tab 在 Mac 上没有被 focus，只能从这里看。
+    if (result) navigate({ name: "session", surfaceId: result.surfaceId });
+  };
+
+  if (!open) {
+    return (
+      <div className="pane-new">
+        <button
+          type="button"
+          className="pane-new-trigger"
+          disabled={!controlMode}
+          title={controlMode ? "在这个 pane 里新开一个 tab" : "只读模式，请先开启 Control Mode"}
+          onClick={() => setOpen(true)}
+        >
+          ＋ 新建 surface
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pane-new open">
+      <button type="button" className="pane-new-option" disabled={busy} onClick={() => void create(null)}>
+        Shell
+      </button>
+      {AGENT_KINDS.map((kind) => (
+        <button
+          key={kind}
+          type="button"
+          className="pane-new-option"
+          disabled={busy}
+          onClick={() => void create(kind)}
+        >
+          {AGENT_DISPLAY_NAME[kind]}
+        </button>
+      ))}
+      <button type="button" className="pane-new-cancel" disabled={busy} onClick={() => setOpen(false)}>
+        {busy ? "创建中…" : "取消"}
+      </button>
+    </div>
   );
 }
 

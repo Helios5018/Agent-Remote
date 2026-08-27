@@ -43,6 +43,10 @@ scripts/           cmux-agent-web-hook + 安装/卸载
   `terminal.replay` 只吃 `surface_id`，回滚 240 行封顶，别再找参数了。
 - 别再找「按行滚动 / 转发滚轮」的 cmux 接口：`terminal.scroll`、`terminal.mouse` 实测是空壳
   （不校验参数、画面不动）。TUI 只能整屏翻，前端用手势（`usePageGesture`）包装成翻页。
+- 新建 surface 只建 terminal，`--type agent-session` 是死路（读不到画面也发不了输入）。
+  起 Agent 走服务端白名单命令（`config.launchCommands`），不收前端传的命令字符串。
+  新 tab 懒启动，建完必须发一次回车唤醒，否则没有 tty、读画面直接报错；
+  工作目录 cmux 不给，只能 `lsof` 反查同 pane 进程的 cwd。
 
 ## 当前状态（2026-08-24）
 

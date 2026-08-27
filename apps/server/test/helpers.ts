@@ -10,6 +10,8 @@ import { StateStore } from "../src/state/store.ts";
 
 export const TEST_PIN = "4271";
 export const TEST_HOOK_TOKEN = "hook-secret-for-tests-0123456789";
+/** 新建 surface 时服务端「反查」出来的工作目录，测试里固定成这个值。 */
+export const TEST_PANE_CWD = "/tmp/car-test-cwd";
 
 export interface TestHarness {
   ctx: AppContext;
@@ -48,6 +50,7 @@ export async function createHarness(options: { pin?: string; trustProxy?: boolea
     maxHistoryLines: 5000,
     // 测试用假 cmux，没有真的重绘要等
     scrollRedrawDelayMs: 0,
+    launchCommands: { claude: "c-d", codex: "codex-d", grok: "g-d" },
   };
 
   const client = new FakeCmuxClient(undefined, now);
@@ -58,7 +61,18 @@ export async function createHarness(options: { pin?: string; trustProxy?: boolea
   const sessions = new SessionManager({ token: config.pin, controlTtlMs: config.controlTtlMs, now });
   const throttle = new LoginThrottle({ now });
 
-  const ctx: AppContext = { config, client, engine, store, sessions, throttle, hub, now };
+  const ctx: AppContext = {
+    config,
+    client,
+    engine,
+    store,
+    sessions,
+    throttle,
+    hub,
+    // 假 cmux 的 tty / pid 都是编的，绝不能拿去 lsof 真实进程
+    paneCwd: async () => TEST_PANE_CWD,
+    now,
+  };
   const app = createApp(ctx);
 
   // 先同步一次拓扑，让 Agent 列表就绪

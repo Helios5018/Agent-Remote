@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_PORT } from "@car/protocol";
+import { DEFAULT_PORT, type AgentKind } from "@car/protocol";
 import { DEFAULT_CONTROL_TTL_MS, MIN_PIN_LENGTH } from "./security/token.ts";
 
 export interface ServerConfig {
@@ -31,6 +31,13 @@ export interface ServerConfig {
   maxHistoryLines: number;
   /** 翻页后等 TUI 重绘多久再截图；太快会读到旧画面。 */
   scrollRedrawDelayMs: number;
+  /**
+   * 新建 surface 时「顺手起一个 Agent」执行的命令。
+   *
+   * 默认是 ~/.zshrc 里的别名（带跳过确认的参数）—— 手机上没法一路点确认。
+   * 这是一份白名单：前端只能从 claude/codex/grok 里选，不能传任意命令。
+   */
+  launchCommands: Record<AgentKind, string>;
 }
 
 export interface ParseArgsResult {
@@ -64,6 +71,11 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     maxOutputLines: Number(env["CAR_MAX_OUTPUT_LINES"] ?? 400),
     maxHistoryLines: Number(env["CAR_MAX_HISTORY_LINES"] ?? 5000),
     scrollRedrawDelayMs: Number(env["CAR_SCROLL_REDRAW_DELAY_MS"] ?? 160),
+    launchCommands: {
+      claude: env["CAR_LAUNCH_CLAUDE"] ?? "c-d",
+      codex: env["CAR_LAUNCH_CODEX"] ?? "codex-d",
+      grok: env["CAR_LAUNCH_GROK"] ?? "g-d",
+    },
   };
   let help = false;
   let pinProvided = config.pin.length > 0;
@@ -155,4 +167,9 @@ export const HELP_TEXT = `CMUX Agent Remote
   --static <dir>        前端静态文件目录
   --demo                使用内置假数据（没有 cmux 也能跑）
   -h, --help            显示帮助
+
+环境变量:
+  CAR_LAUNCH_CLAUDE     新建 surface 时起 Claude 的命令（默认 c-d）
+  CAR_LAUNCH_CODEX      同上，Codex（默认 codex-d）
+  CAR_LAUNCH_GROK       同上，Grok（默认 g-d）
 `;

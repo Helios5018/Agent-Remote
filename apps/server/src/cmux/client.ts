@@ -22,6 +22,14 @@ export interface CmuxClient {
    */
   readGrid(surfaceId: string): Promise<SurfaceGrid>;
 
+  /**
+   * 在指定 pane 里新建一个 terminal surface。
+   *
+   * 实现方需要保证返回时这个 surface 已经能读能写 —— cmux 的新 tab 是懒启动的，
+   * 没被激活过就没有 tty，`read-screen` / `terminal.replay` 都会直接报错。
+   */
+  createSurface(options: CreateSurfaceOptions): Promise<CreatedSurface>;
+
   /** 向 surface 输入文本（只打字，不回车）。 */
   sendText(surfaceId: string, text: string): Promise<void>;
 
@@ -43,6 +51,22 @@ export interface CmuxClient {
   readHistory(surfaceId: string, lines: number): Promise<string>;
 }
 
+export interface CreateSurfaceOptions {
+  /** 目标 pane，UUID 或 pane:N 短引用。 */
+  paneId: string;
+  /** 用短引用时的 workspace 上下文。 */
+  workspaceId?: string;
+  /** 工作目录；不传由 cmux 自己决定（不可控）。 */
+  cwd?: string;
+}
+
+export interface CreatedSurface {
+  surfaceId: string;
+  surfaceRef: string;
+  paneId?: string;
+  workspaceId?: string;
+}
+
 export interface ReadSurfaceOptions {
   /** 读取行数，默认 200。 */
   lines?: number;
@@ -53,7 +77,7 @@ export interface ReadSurfaceOptions {
 export class CmuxError extends Error {
   constructor(
     message: string,
-    readonly code: "CMUX_UNAVAILABLE" | "CMUX_COMMAND_FAILED" | "SURFACE_NOT_FOUND",
+    readonly code: "CMUX_UNAVAILABLE" | "CMUX_COMMAND_FAILED" | "SURFACE_NOT_FOUND" | "PANE_NOT_FOUND",
     readonly detail?: string,
   ) {
     super(message);

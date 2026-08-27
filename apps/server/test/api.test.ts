@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   AgentDetailResponse,
+  CreateSurfaceResponse,
   Inbox,
   SessionInfo,
   SurfaceGrid,
@@ -8,9 +9,16 @@ import type {
   SurfaceScrollResponse,
   SurfaceSnapshot,
   SurfaceWriteResponse,
+  TreeResponse,
 } from "@car/protocol";
 import { GRID_SPAN_TEXT } from "@car/protocol";
-import { createHarness, loginWithControl, TEST_HOOK_TOKEN, TEST_PIN } from "./helpers.ts";
+import {
+  createHarness,
+  loginWithControl,
+  TEST_HOOK_TOKEN,
+  TEST_PANE_CWD,
+  TEST_PIN,
+} from "./helpers.ts";
 
 /** 网格里的可见文字，用来断言「翻页之后看到的是哪一屏」。 */
 function gridText(grid: SurfaceGrid): string {
@@ -698,6 +706,99 @@ describe("审计（§23.5）", () => {
     expect(inputEntry?.surfaceId).toBe("sf-11");
     expect(inputEntry?.detail).toMatch(/^len=\d+ submit=true$/);
     expect(JSON.stringify(entries)).not.toContain("敏感");
+  });
+});
+
+describe("新建 surface", () => {
+  it("只读模式下不能新建", async () => {
+    const harness = await createHarness();
+    const cookie = await harness.loginCookie();
+    const response = await harness.request("/api/surfaces", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ paneId: "pane-7" }),
+    });
+    expect(response.status).toBe(403);
+    expect(harness.client.created).toHaveLength(0);
+  });
+
+  it("控制模式下建一个 shell：带上反查到的工作目录，并出现在拓扑里", async () => {
+    const harness = await createHarness();
+    const cookie = await loginWithControl(harness);
+
+    const response = await harness.request("/api/surfaces", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ paneId: "pane-7", workspaceId: "ws-world-model" }),
+    });
+    expect(response.status).toBe(201);
+
+    const body = (await response.json()) as CreateSurfaceResponse;
+    expect(body).toMatchObject({ ok: true, cwd: TEST_PANE_CWD, launched: null });
+    expect(body.surfaceId).toBeTruthy();
+    // 建 surface 也是写操作，同样要把续期后的到期时间带回去
+    expect(typeof body.controlModeExpiresAt).toBe("number");
+    expect(harness.client.created).toEqual([
+      { paneId: "pane-7", workspaceId: "ws-world-model", cwd: TEST_PANE_CWD },
+    ]);
+    // 没选 Agent 就不该往终端里敲任何东西
+    expect(harness.client.sentText).toHaveLength(0);
+
+    const tree = (await (await harness.request("/api/tree", { cookie })).json()) as TreeResponse;
+    const surfaces = tree.workspaces.flatMap((ws) => ws.panes.flatMap((pane) => pane.surfaces));
+    expect(surfaces.some((surface) => surface.id === body.surfaceId)).toBe(true);
+
+    const audit = harness.store.recentAudit(10).find((entry) => entry.action === "surface.create");
+    expect(audit?.surfaceId).toBe(body.surfaceId);
+    expect(audit?.detail).toContain("pane=pane-7");
+  });
+
+  it("选了 Agent 就在新 tab 里敲白名单命令", async () => {
+    const harness = await createHarness();
+    const cookie = await loginWithControl(harness);
+
+    const response = await harness.request("/api/surfaces", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ paneId: "pane-7", launch: "claude" }),
+    });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as CreateSurfaceResponse;
+
+    expect(harness.client.sentText).toEqual([{ surfaceId: body.surfaceId, text: "c-d" }]);
+    expect(harness.client.sentKeys).toEqual([{ surfaceId: body.surfaceId, key: "enter" }]);
+  });
+
+  it("launch 只收白名单，任意命令一律 400", async () => {
+    const harness = await createHarness();
+    const cookie = await loginWithControl(harness);
+    const response = await harness.request("/api/surfaces", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ paneId: "pane-7", launch: "rm -rf /" }),
+    });
+    expect(response.status).toBe(400);
+    expect(harness.client.created).toHaveLength(0);
+  });
+
+  it("pane 必填，且必须在当前拓扑里真实存在", async () => {
+    const harness = await createHarness();
+    const cookie = await loginWithControl(harness);
+
+    const missing = await harness.request("/api/surfaces", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ launch: null }),
+    });
+    expect(missing.status).toBe(400);
+
+    const unknown = await harness.request("/api/surfaces", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ paneId: "pane-does-not-exist" }),
+    });
+    expect(unknown.status).toBe(404);
+    expect(harness.client.created).toHaveLength(0);
   });
 });
 
