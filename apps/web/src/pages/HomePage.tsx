@@ -77,7 +77,7 @@ export function HomePage({
   /** 只看某一个 workspace（来自 #/w/:id 深链）。 */
   workspaceId?: string;
 }) {
-  const { inbox, tree, refreshInbox, refreshTree, subscribe, connection } = useAppStore();
+  const { inbox, tree, error, refreshInbox, refreshTree, subscribe, connection } = useAppStore();
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
   const [query, setQuery] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -223,6 +223,8 @@ export function HomePage({
         {connection !== "open" ? (
           <div className="banner">连接中断，正在自动重连…（已退化为轮询）</div>
         ) : null}
+        {/* 首页也会发写请求（新建 surface），失败必须看得见，否则就是「点了没反应」 */}
+        {error ? <div className="banner error">{error}</div> : null}
 
         <TreeView
           model={model}
@@ -380,30 +382,48 @@ function NewSurfaceRow({
   const { createSurface, session } = useAppStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // 失败原因就地显示。顶部的 banner 在长列表里可能已经滚出屏幕，看不见等于没提示。
+  const [note, setNote] = useState<string | null>(null);
   const controlMode = session?.controlMode === true;
+
+  // 开启 / 退出控制模式就把上一次的提示收掉
+  useEffect(() => setNote(null), [controlMode]);
 
   const create = async (launch: AgentKind | null) => {
     if (busy) return;
     setBusy(true);
-    const result = await createSurface(pane.id ?? pane.ref, workspaceId, launch);
-    setBusy(false);
-    setOpen(false);
-    // 建完直接进会话页：新 tab 在 Mac 上没有被 focus，只能从这里看。
-    if (result) navigate({ name: "session", surfaceId: result.surfaceId });
+    setNote(null);
+    try {
+      const result = await createSurface(pane.id ?? pane.ref, workspaceId, launch);
+      setOpen(false);
+      // 建完直接进会话页：新 tab 在 Mac 上没有被 focus，只能从这里看。
+      navigate({ name: "session", surfaceId: result.surfaceId });
+    } catch (caught) {
+      setNote(`没建成：${caught instanceof Error ? caught.message : String(caught)}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!open) {
     return (
       <div className="pane-new">
+        {/*
+          只读时刻意不 disabled：手机上没有 hover，灰按钮点下去毫无动静，
+          用户只会以为坏了。让它可点，点了就说清为什么没展开。
+        */}
         <button
           type="button"
           className="pane-new-trigger"
-          disabled={!controlMode}
-          title={controlMode ? "在这个 pane 里新开一个 tab" : "只读模式，请先开启 Control Mode"}
-          onClick={() => setOpen(true)}
+          onClick={() =>
+            controlMode
+              ? setOpen(true)
+              : setNote("只读模式：先点右上角 READ ONLY 开启控制")
+          }
         >
           ＋ 新建 surface
         </button>
+        {note ? <div className="pane-new-note">{note}</div> : null}
       </div>
     );
   }
@@ -427,6 +447,7 @@ function NewSurfaceRow({
       <button type="button" className="pane-new-cancel" disabled={busy} onClick={() => setOpen(false)}>
         {busy ? "创建中…" : "取消"}
       </button>
+      {note ? <div className="pane-new-note">{note}</div> : null}
     </div>
   );
 }

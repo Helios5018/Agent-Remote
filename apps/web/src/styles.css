@@ -402,11 +402,17 @@ body {
   color: var(--text);
 }
 
-.pane-new-trigger:disabled,
 .pane-new-option:disabled,
 .pane-new-cancel:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* 「为什么没建成」就地说明；整行独占，别和按钮挤在一起 */
+.pane-new-note {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--error);
 }
 
 .surface-row {

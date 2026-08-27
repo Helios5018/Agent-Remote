@@ -179,14 +179,30 @@ async function serveStatic(root: string, pathname: string): Promise<Response | u
   if (!target.startsWith(resolve(root))) return new Response("forbidden", { status: 403 });
 
   const file = bun.file(target);
-  if (await file.exists()) return new Response(file as unknown as BodyInit);
+  if (await file.exists()) {
+    return new Response(file as unknown as BodyInit, { headers: cacheHeaders(relative) });
+  }
 
   // SPA 回退
   const index = bun.file(join(root, "index.html"));
   if (await index.exists()) return new Response(index as unknown as BodyInit, {
-    headers: { "content-type": "text/html; charset=utf-8" },
+    headers: { "content-type": "text/html; charset=utf-8", ...cacheHeaders("index.html") },
   });
   return undefined;
+}
+
+/**
+ * 缓存策略。
+ *
+ * index.html 必须每次回源校验：它引的是带内容指纹的 JS，页面被缓存住的话
+ * 手机上就会一直跑旧前端 —— 改完发现「点了没反应」，其实是根本没加载新代码。
+ * assets/ 下的文件名本身带 hash，可以放心长期缓存。
+ */
+function cacheHeaders(relative: string): Record<string, string> {
+  if (relative.startsWith("assets/")) {
+    return { "cache-control": "public, max-age=31536000, immutable" };
+  }
+  return { "cache-control": "no-cache" };
 }
 
 function resolveStaticDir(config: ServerConfig): string | null {

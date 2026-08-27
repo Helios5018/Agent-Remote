@@ -49,12 +49,15 @@ interface AppStoreValue {
   refreshInbox(): Promise<void>;
   refreshTree(): Promise<void>;
   openSession(surfaceId: string): Promise<AgentState | null>;
-  /** 在某个 pane 里新建一个 surface；成功后拓扑已刷新，返回新 surface 的信息。 */
+  /**
+   * 在某个 pane 里新建一个 surface；成功后拓扑已刷新。
+   * 和其它写操作一样：失败会抛出，调用方要据此给出可见的反馈。
+   */
   createSurface(
     paneId: string,
     workspaceId: string | undefined,
     launch: AgentKind | null,
-  ): Promise<CreateSurfaceResponse | null>;
+  ): Promise<CreateSurfaceResponse>;
   subscribe(surfaceId: string | null): void;
   /** 写操作失败会抛出 —— 调用方要据此保住用户没发出去的内容。 */
   sendInput(surfaceId: string, text: string, submit: boolean): Promise<void>;
@@ -281,13 +284,19 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       },
 
       async createSurface(paneId: string, workspaceId: string | undefined, launch: AgentKind | null) {
-        const result = await withError(() => api.createSurface(paneId, workspaceId, launch));
-        if (result) {
+        // 和 sendInput 一样失败即抛出：调用方要就地说明「为什么没建成」，
+        // 吞成 null 的话按钮点下去毫无动静，和坏了没区别。
+        try {
+          const result = await api.createSurface(paneId, workspaceId, launch);
+          setError(null);
           noteControlRenewed(result.controlModeExpiresAt);
           // 新 tab 得立刻出现在结构树里，否则跳过去会看到「找不到 surface」。
           await refreshTree();
+          return result;
+        } catch (caught) {
+          noteApiError(caught);
+          throw caught;
         }
-        return result;
       },
 
       subscribe,
