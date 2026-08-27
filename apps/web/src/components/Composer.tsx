@@ -27,6 +27,11 @@ const KEY_GROUPS: KeyButton[][] = [
   [{ key: "ctrl+c", label: "Ctrl+C", title: DANGEROUS_KEY_HINT["ctrl+c"] ?? "中断" }],
 ];
 
+function describeFailure(caught: unknown): string {
+  const reason = caught instanceof Error ? caught.message : String(caught);
+  return `没发出去：${reason}`;
+}
+
 export function Composer({
   disabled,
   collapsible = false,
@@ -43,6 +48,8 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [pendingKey, setPendingKey] = useState<CmuxKey | null>(null);
+  // 发送失败的原因就地显示：全局 error 会被紧随其后的刷新请求成功清掉，根本来不及看
+  const [failure, setFailure] = useState<string | null>(null);
   // 中文输入法组字期间不能提交（需求文档 §26 中文输入）
   const [composing, setComposing] = useState(false);
   const keyBarRef = useRef<HTMLDivElement | null>(null);
@@ -63,14 +70,21 @@ export function Composer({
     return () => window.removeEventListener("resize", syncEdges);
   }, []);
 
+  // 重新开启（或退出）控制模式就把上一次的失败提示收掉
+  useEffect(() => setFailure(null), [disabled]);
+
   const send = async (submit: boolean) => {
     if (busy || disabled) return;
     const value = text;
     if (value.trim().length === 0 && submit === false) return;
     setBusy(true);
+    setFailure(null);
     try {
       await onSend(value, submit);
+      // 只有确认发出去了才清空 —— 失败还清空的话，用户辛苦打的内容就白没了
       setText("");
+    } catch (caught) {
+      setFailure(describeFailure(caught));
     } finally {
       setBusy(false);
     }
@@ -85,8 +99,11 @@ export function Composer({
     }
     setPendingKey(null);
     setBusy(true);
+    setFailure(null);
     try {
       await onKey(key, isDangerousKey(key));
+    } catch (caught) {
+      setFailure(describeFailure(caught));
     } finally {
       setBusy(false);
     }
@@ -110,6 +127,7 @@ export function Composer({
         </button>
       ) : null}
       {disabled ? <div className="composer-hint">只读模式：点击右上角 READ ONLY 开启控制</div> : null}
+      {failure ? <div className="composer-hint danger-hint">{failure}</div> : null}
       <div className="composer-input-row">
         <textarea
           className="composer-input"

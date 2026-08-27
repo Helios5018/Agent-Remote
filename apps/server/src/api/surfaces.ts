@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import {
   isDangerousKey,
   SurfaceInputRequestSchema,
@@ -6,6 +6,7 @@ import {
   SurfaceScrollRequestSchema,
   type ScrollKey,
   type SurfaceGrid,
+  type SurfaceWriteResponse,
 } from "@car/protocol";
 import { apiError, type AppContext } from "../context.ts";
 import { CmuxError } from "../cmux/client.ts";
@@ -123,7 +124,7 @@ export function createSurfaceRoutes(ctx: AppContext) {
     }
     ctx.poller?.scheduleImmediate(surfaceId);
 
-    return c.json({ ok: true as const });
+    return c.json(writeResponse(ctx, c));
   });
 
   app.post("/:surfaceId/key", requireControl(ctx), async (c) => {
@@ -147,10 +148,22 @@ export function createSurfaceRoutes(ctx: AppContext) {
 
     ctx.store.audit({ at: ctx.now(), action: "surface.key", surfaceId, detail: key });
     ctx.poller?.scheduleImmediate(surfaceId);
-    return c.json({ ok: true as const });
+    return c.json(writeResponse(ctx, c));
   });
 
   return app;
+}
+
+/**
+ * 写操作成功后，把续期后的控制模式到期时间带回去。
+ * 前端拿它续本地倒计时，CONTROL 徽标才会和服务端同一时刻回落。
+ */
+function writeResponse(ctx: AppContext, c: Context<Env>): SurfaceWriteResponse {
+  const session = c.get("session");
+  return {
+    ok: true as const,
+    controlModeExpiresAt: ctx.sessions.hasControl(session) ? session.controlUntil : undefined,
+  };
 }
 
 /** 翻一屏，等 TUI 重绘完再截图 —— 读太快会拿到翻页前的旧画面。 */

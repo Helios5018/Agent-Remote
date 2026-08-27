@@ -7,6 +7,7 @@ import type {
   SurfaceHistoryResponse,
   SurfaceScrollResponse,
   SurfaceSnapshot,
+  SurfaceWriteResponse,
 } from "@car/protocol";
 import { GRID_SPAN_TEXT } from "@car/protocol";
 import { createHarness, loginWithControl, TEST_HOOK_TOKEN, TEST_PIN } from "./helpers.ts";
@@ -287,6 +288,26 @@ describe("安全：Read / Control Mode（§23.2）", () => {
         })
       ).status,
     ).toBe(200);
+  });
+
+  it("写操作的响应带回续期后的到期时间", async () => {
+    const harness = await createHarness();
+    const cookie = await loginWithControl(harness);
+    harness.clock.advance(30_000);
+
+    const response = await harness.request("/api/surfaces/sf-11/input", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ text: "hi", submit: true }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as SurfaceWriteResponse;
+
+    // 前端拿这个时间点做本地倒计时；对不上的话 CONTROL 徽标会比服务端先过期，
+    // 用户看着还亮着 CONTROL，一点发送却被 403 顶回来。
+    const info = (await (await harness.request("/api/auth/session", { cookie })).json()) as SessionInfo;
+    expect(body.controlModeExpiresAt).toBe(info.controlModeExpiresAt);
+    expect(body.controlModeExpiresAt).toBe(harness.clock.value + 60_000);
   });
 });
 

@@ -48,6 +48,7 @@ interface AppStoreValue {
   refreshTree(): Promise<void>;
   openSession(surfaceId: string): Promise<AgentState | null>;
   subscribe(surfaceId: string | null): void;
+  /** 写操作失败会抛出 —— 调用方要据此保住用户没发出去的内容。 */
   sendInput(surfaceId: string, text: string, submit: boolean): Promise<void>;
   sendKey(surfaceId: string, key: CmuxKey, confirm?: boolean): Promise<void>;
   /** 翻页（只读模式下也可用），成功后网格直接被替换成滚动后的画面。 */
@@ -97,21 +98,43 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const { state: connection, subscribe } = useRealtime({ enabled: authenticated, onMessage: handleMessage });
 
-  const withError = useCallback(async <T,>(fn: () => Promise<T>): Promise<T | null> => {
-    try {
-      const result = await fn();
-      setError(null);
-      return result;
-    } catch (caught) {
-      if (caught instanceof ApiError) {
-        if (caught.status === 401) setSession((s) => (s ? { ...s, authenticated: false } : null));
-        setError(caught.message);
-      } else {
-        setError(caught instanceof Error ? caught.message : String(caught));
+  /**
+   * 统一处理接口错误。
+   *
+   * 401 / READ_ONLY 都要顺手把本地会话状态改对：控制模式在服务端会静默过期，
+   * 徽标要是还停在 CONTROL，用户就会对着一个「假 CONTROL」反复点发送。
+   */
+  const noteApiError = useCallback((caught: unknown) => {
+    if (caught instanceof ApiError) {
+      if (caught.status === 401) setSession((s) => (s ? { ...s, authenticated: false } : null));
+      if (caught.code === "READ_ONLY") {
+        setSession((s) => (s ? { ...s, controlMode: false, controlModeExpiresAt: undefined } : s));
       }
-      return null;
+      setError(caught.message);
+    } else {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
   }, []);
+
+  /** 服务端每次写操作都会给控制模式续期，本地倒计时跟着走。 */
+  const noteControlRenewed = useCallback((expiresAt: number | undefined) => {
+    if (!expiresAt) return;
+    setSession((s) => (s?.controlMode ? { ...s, controlModeExpiresAt: expiresAt } : s));
+  }, []);
+
+  const withError = useCallback(
+    async <T,>(fn: () => Promise<T>): Promise<T | null> => {
+      try {
+        const result = await fn();
+        setError(null);
+        return result;
+      } catch (caught) {
+        noteApiError(caught);
+        return null;
+      }
+    },
+    [noteApiError],
+  );
 
   const refreshInbox = useCallback(async () => {
     const result = await withError(() => api.agents());
@@ -171,6 +194,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     const timer = window.setInterval(() => void refreshInbox(), 5000);
     return () => window.clearInterval(timer);
   }, [authenticated, connection, refreshInbox]);
+
+  /*
+   * 控制模式到点自动回落。
+   *
+   * 服务端过期是静默的，前端不自己倒计时的话徽标会一直亮着 CONTROL，
+   * 用户要等到点了发送被 403 才知道 —— 那一下的内容还发不出去。
+   */
+  useEffect(() => {
+    const expiresAt = session?.controlModeExpiresAt;
+    if (session?.controlMode !== true || !expiresAt) return;
+    const timer = window.setTimeout(
+      () => setSession((s) => (s ? { ...s, controlMode: false, controlModeExpiresAt: undefined } : s)),
+      Math.max(0, expiresAt - Date.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [session?.controlMode, session?.controlModeExpiresAt]);
 
   const value = useMemo<AppStoreValue>(
     () => ({
@@ -235,12 +274,30 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       subscribe,
 
+      /*
+       * 写操作故意不走 withError：它把异常吞成 null，调用方分不清成功还是失败，
+       * Composer 就会在发送失败后照样清空输入框 —— 表现出来就是「点了没反应，字还没了」。
+       */
       async sendInput(surfaceId: string, text: string, submit: boolean) {
-        await withError(() => api.sendInput(surfaceId, text, submit));
+        try {
+          const result = await api.sendInput(surfaceId, text, submit);
+          setError(null);
+          noteControlRenewed(result.controlModeExpiresAt);
+        } catch (caught) {
+          noteApiError(caught);
+          throw caught;
+        }
       },
 
       async sendKey(surfaceId: string, key: CmuxKey, confirm = false) {
-        await withError(() => api.sendKey(surfaceId, key, confirm));
+        try {
+          const result = await api.sendKey(surfaceId, key, confirm);
+          setError(null);
+          noteControlRenewed(result.controlModeExpiresAt);
+        } catch (caught) {
+          noteApiError(caught);
+          throw caught;
+        }
       },
 
       async scrollSurface(surfaceId: string, action: ScrollAction) {
@@ -270,6 +327,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       refreshGrid,
       subscribe,
       withError,
+      noteApiError,
+      noteControlRenewed,
     ],
   );
 

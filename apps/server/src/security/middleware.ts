@@ -58,9 +58,11 @@ export function requireControl(ctx: AppContext): MiddlewareHandler<Env> {
         403,
       );
     }
-    await next();
-    // 有效的写操作会续期控制模式，长时间不操作会自动回到只读。
+    // 过了校验就续期，长时间不操作才会自动回到只读。
+    // 刻意放在 next() 之前：handler 要把续期后的到期时间写进响应
+    // （SurfaceWriteResponse），放到后面就来不及了。
     ctx.sessions.touchControl(session);
+    await next();
   };
 }
 

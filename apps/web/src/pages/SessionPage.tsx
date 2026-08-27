@@ -373,6 +373,10 @@ export function SessionPage({
         </div>
       </div>
 
+      {/*
+        发送失败时异常会往上抛给 Composer（它据此保住输入内容并提示原因），
+        顺带跳过 refreshGrid —— 刷新成功会把刚设上的错误又清掉。
+      */}
       <Composer
         disabled={!controlMode}
         collapsible={immersive}

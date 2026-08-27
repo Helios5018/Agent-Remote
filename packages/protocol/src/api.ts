@@ -61,6 +61,18 @@ export const SurfaceKeyRequestSchema = z.object({
 export type SurfaceKeyRequest = z.infer<typeof SurfaceKeyRequestSchema>;
 
 /**
+ * 写操作（input / key）的响应。
+ *
+ * 带上续期后的控制模式到期时间：服务端每次写操作都会续期，
+ * 前端只有跟着续，界面上的 CONTROL 才不会比服务端先「过期」。
+ */
+export const SurfaceWriteResponseSchema = z.object({
+  ok: z.literal(true),
+  controlModeExpiresAt: z.number().optional(),
+});
+export type SurfaceWriteResponse = z.infer<typeof SurfaceWriteResponseSchema>;
+
+/**
  * POST /api/surfaces/:surfaceId/scroll —— 翻页。
  *
  * 和 /key 分开：翻页只改「看到哪一屏」，不往终端里写东西，所以只读模式也允许。

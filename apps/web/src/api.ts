@@ -8,6 +8,7 @@ import type {
   SurfaceHistoryResponse,
   SurfaceScrollResponse,
   SurfaceSnapshot,
+  SurfaceWriteResponse,
   TreeResponse,
 } from "@car/protocol";
 
@@ -74,13 +75,13 @@ export const api = {
   grid: (surfaceId: string) => request<SurfaceGrid>(`/api/surfaces/${encodeURIComponent(surfaceId)}/grid`),
 
   sendInput: (surfaceId: string, text: string, submit: boolean) =>
-    request<{ ok: true }>(`/api/surfaces/${encodeURIComponent(surfaceId)}/input`, {
+    request<SurfaceWriteResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/input`, {
       method: "POST",
       body: JSON.stringify({ text, submit }),
     }),
 
   sendKey: (surfaceId: string, key: CmuxKey, confirm = false) =>
-    request<{ ok: true }>(`/api/surfaces/${encodeURIComponent(surfaceId)}/key`, {
+    request<SurfaceWriteResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/key`, {
       method: "POST",
       body: JSON.stringify({ key, confirm }),
     }),
