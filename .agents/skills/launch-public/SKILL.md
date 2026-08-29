@@ -29,7 +29,18 @@ bash .agents/skills/launch-public/scripts/launch-public.sh start
 
 stdout 是一行 JSON：`ok`、`url`、`pin`、`port`、`tmux_session`、`tunnel_id`、`local`、`logs`、`stop_server`、`stop_tunnel`。`ok != true` 时按 `error` 修，不要发飞书。
 
-3. 把 `url` 和 `pin` 发给 Link。先解析收件人，再发：
+3. 收集用于辨认当前宿主机的低敏设备信息。只收集设备名称、型号、系统版本、CPU 架构、当前默认网卡的局域网 IP；不要收集或发送序列号、Hardware UUID、MAC 地址、Apple ID、用户名、完整网络配置：
+
+```bash
+device_name="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
+device_model="$(sysctl -n hw.model 2>/dev/null || echo 未知)"
+os_version="$(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+cpu_arch="$(uname -m)"
+default_interface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+lan_ip="$(ipconfig getifaddr "$default_interface" 2>/dev/null || echo 未连接)"
+```
+
+4. 把 `url`、`pin` 和设备信息发给 Link。先解析收件人，再发：
 
 ```bash
 lark-cli contact +search-user --query "link@vivix.ai" --as user --format json
@@ -38,12 +49,13 @@ lark-cli contact +search-user --query "link@vivix.ai" --as user --format json
 用返回的 `open_id`。搜不到再用 `ou_51401736edf0bf24ea96d0edebe3f28d`。然后：
 
 ```bash
-lark-cli im +messages-send --as user --user-id <open_id> --markdown $'## Agent Remote 已上公网\n\n- 地址：<url>\n- Access PIN：<pin>\n\n本机 http://127.0.0.1:4318 · tmux `agent-remote-web`'
+notice="$(printf '## Agent Remote 已上公网\n\n- 地址：%s\n- Access PIN：%s\n\n### 运行设备\n\n- 设备名称：%s\n- 设备型号：%s\n- 系统版本：%s\n- CPU 架构：%s\n- 局域网 IP：%s\n\n本机 http://127.0.0.1:4318 · tmux `agent-remote-web`' "$url" "$pin" "$device_name" "$device_model" "$os_version" "$cpu_arch" "$lan_ip")"
+lark-cli im +messages-send --as user --user-id <open_id> --markdown "$notice"
 ```
 
 飞书失败仍要把 `url` / `pin` 当面告诉用户。
 
-4. 回复用户时写清：tmux session 名、启动命令、端口、看日志、怎么停。PIN 已经在飞书里就不要再贴一遍，除非飞书没发出去。
+5. 回复用户时写清：tmux session 名、启动命令、端口、看日志、怎么停。PIN 已经在飞书里就不要再贴一遍，除非飞书没发出去。
 
 ## 运行中原地刷新
 
@@ -57,7 +69,7 @@ bash .agents/skills/launch-public/scripts/launch-public.sh refresh
 
 如果 `4318` 正在监听但不属于 `agent-remote-web`，脚本会停止并报错，禁止为追求原地更新而误杀未知进程。刷新后必须验证本地与公网 HTTP 状态；前端有改动时还要确认公网 HTML 引用的资源哈希与 `apps/web/dist/index.html` 一致。
 
-刷新成功后，按上面的飞书流程发送当前 URL 与 PIN，消息标题改为“Agent Remote 已原地刷新”。
+刷新成功后，按上面的飞书流程重新采集并发送当前 URL、PIN 与设备信息，消息标题改为“Agent Remote 已原地刷新”。
 
 ## 关掉
 
@@ -73,4 +85,5 @@ bash .agents/skills/launch-public/scripts/launch-public.sh stop
 - 原地刷新用 `--trust-proxy --pin-length 6` 重启，保留现有 PIN；首次公网拉起才使用 `--rotate-pin`。
 - Sealtun 已有指向 4318 的隧道就复用；停着的先 `sealtun start`。新建才 `sealtun expose 4318 --rate-limit 60/m --audit`。
 - 不要打印 Hook 密钥，不要把 PIN 写进仓库 / commit / 文档。
+- 飞书设备信息仅用于区分当前运行宿主机；禁止发送序列号、Hardware UUID、MAC 地址、Apple ID、用户名等可持久识别设备或用户的信息。
 - sealtun 未登录：让用户本机跑 `sealtun login`，等浏览器授权，再重跑脚本。不要替用户开交互式 login 死等。
