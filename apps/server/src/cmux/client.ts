@@ -49,6 +49,12 @@ export interface CmuxClient {
    * 一次性把上千行历史塞进快照会让「输出有没有变化」的判断全乱掉。
    */
   readHistory(surfaceId: string, lines: number): Promise<string>;
+
+  /** 改 surface / tab 在 cmux 里的真实标题。 */
+  renameSurface(surfaceId: string, title: string): Promise<void>;
+
+  /** 改 workspace 在 cmux 里的真实标题。 */
+  renameWorkspace(workspaceId: string, title: string): Promise<void>;
 }
 
 export interface CreateSurfaceOptions {
@@ -77,7 +83,12 @@ export interface ReadSurfaceOptions {
 export class CmuxError extends Error {
   constructor(
     message: string,
-    readonly code: "CMUX_UNAVAILABLE" | "CMUX_COMMAND_FAILED" | "SURFACE_NOT_FOUND" | "PANE_NOT_FOUND",
+    readonly code:
+      | "CMUX_UNAVAILABLE"
+      | "CMUX_COMMAND_FAILED"
+      | "SURFACE_NOT_FOUND"
+      | "PANE_NOT_FOUND"
+      | "WORKSPACE_NOT_FOUND",
     readonly detail?: string,
   ) {
     super(message);

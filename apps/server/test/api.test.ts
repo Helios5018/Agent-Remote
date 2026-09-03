@@ -243,6 +243,13 @@ describe("安全：Read / Control Mode（§23.2）", () => {
     expect(input.status).toBe(403);
     expect(await input.json()).toMatchObject({ error: { code: "READ_ONLY" } });
     expect(harness.client.sentText).toHaveLength(0);
+
+    const rename = await harness.request("/api/surfaces/sf-11/title", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ title: "不该改成功" }),
+    });
+    expect(rename.status).toBe(403);
   });
 
   it("显式开启控制模式后可以写", async () => {
@@ -423,6 +430,32 @@ describe("API：Agents / Tree / Output", () => {
     expect(tree.workspaces[0]?.title).toBe("世界模型 Demo");
     // 结构里保留非 Agent 的 shell surface
     expect(tree.workspaces[0]?.panes[1]?.surfaces[0]?.agent).toBeNull();
+  });
+
+  it("控制模式下可以改 surface / workspace 名称，并写回拓扑", async () => {
+    const harness = await createHarness();
+    const cookie = await loginWithControl(harness);
+
+    const surface = await harness.request("/api/surfaces/sf-11/title", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ title: "评测主会话" }),
+    });
+    expect(surface.status).toBe(200);
+
+    const workspace = await harness.request("/api/workspaces/ws-world-model/title", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ title: "世界模型" }),
+    });
+    expect(workspace.status).toBe(200);
+
+    const tree = (await (await harness.request("/api/tree", { cookie })).json()) as {
+      workspaces: Array<{ title: string; panes: Array<{ surfaces: Array<{ id: string; title: string }> }> }>;
+    };
+    expect(tree.workspaces[0]?.title).toBe("世界模型");
+    const renamed = tree.workspaces[0]?.panes.flatMap((pane) => pane.surfaces).find((item) => item.id === "sf-11");
+    expect(renamed?.title).toBe("评测主会话");
   });
 
   it("GET /api/surfaces/:id/output 返回清洗后的文本", async () => {

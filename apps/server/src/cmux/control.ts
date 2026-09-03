@@ -89,5 +89,22 @@ export function buildReplayArgs(surfaceId: string): string[] {
   return ["rpc", "terminal.replay", JSON.stringify({ surface_id: surfaceId })];
 }
 
+export function assertWorkspaceTarget(workspaceId: string | undefined | null): asserts workspaceId is string {
+  if (typeof workspaceId !== "string" || workspaceId.trim().length === 0) {
+    throw new Error("改 workspace 名必须显式指定 workspace");
+  }
+}
+
+export function buildRenameTabArgs(surfaceId: string, title: string): string[] {
+  assertSurfaceTarget(surfaceId);
+  return ["rename-tab", "--surface", surfaceId, "--title", title];
+}
+
+export function buildRenameWorkspaceArgs(workspaceId: string, title: string): string[] {
+  assertWorkspaceTarget(workspaceId);
+  // rename-workspace 没有 --title，只有位置参数；--title 会被当成名字写进去。
+  return ["rename-workspace", "--workspace", workspaceId, "--", title];
+}
+
 export const TREE_ARGS = ["tree", "--all", "--json", "--id-format", "both"];
 export const TOP_ARGS = ["top", "--all", "--processes", "--json"];

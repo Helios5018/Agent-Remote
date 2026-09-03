@@ -5,7 +5,7 @@ import { createAgentRoutes } from "./api/agents.ts";
 import { createAuthRoutes } from "./api/auth.ts";
 import { createHookRoutes } from "./api/hooks.ts";
 import { createSurfaceRoutes } from "./api/surfaces.ts";
-import { createWorkspaceRoutes } from "./api/workspaces.ts";
+import { createWorkspaceRoutes, createWorkspaceWriteRoutes } from "./api/workspaces.ts";
 import { apiError, type AppContext } from "./context.ts";
 import { requireAuth, type Env } from "./security/middleware.ts";
 
@@ -31,6 +31,7 @@ export function createApp(ctx: AppContext) {
   api.use("*", requireAuth(ctx));
   api.route("/agents", createAgentRoutes(ctx));
   api.route("/tree", createWorkspaceRoutes(ctx));
+  api.route("/workspaces", createWorkspaceWriteRoutes(ctx));
   api.route("/surfaces", createSurfaceRoutes(ctx));
   api.get("/audit", (c) => c.json({ entries: ctx.store.recentAudit(100) }));
   app.route("/api", api);

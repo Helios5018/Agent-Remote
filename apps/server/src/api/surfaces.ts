@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import {
   CreateSurfaceRequestSchema,
   isDangerousKey,
+  RenameTitleRequestSchema,
   SurfaceInputRequestSchema,
   SurfaceKeyRequestSchema,
   SurfaceScrollRequestSchema,
@@ -191,6 +192,29 @@ export function createSurfaceRoutes(ctx: AppContext) {
     return c.json(writeResponse(ctx, c));
   });
 
+  app.post("/:surfaceId/title", requireControl(ctx), async (c) => {
+    const surfaceId = c.req.param("surfaceId");
+    const parsed = RenameTitleRequestSchema.safeParse(await safeJson(c.req.raw));
+    if (!parsed.success) return c.json(apiError("BAD_REQUEST", "名称不合法"), 400);
+
+    try {
+      await ctx.client.renameSurface(surfaceId, parsed.data.title);
+      const tree = await ctx.client.getTree();
+      ctx.engine.syncTree(tree);
+    } catch (error) {
+      return handleCmuxError(c, error);
+    }
+
+    ctx.store.audit({
+      at: ctx.now(),
+      action: "surface.rename",
+      surfaceId,
+      detail: `len=${parsed.data.title.length}`,
+    });
+    ctx.hub.broadcast({ type: "agent.list_changed", inbox: ctx.engine.inbox() });
+    return c.json(writeResponse(ctx, c));
+  });
+
   app.post("/:surfaceId/key", requireControl(ctx), async (c) => {
     const surfaceId = c.req.param("surfaceId");
     const parsed = SurfaceKeyRequestSchema.safeParse(await safeJson(c.req.raw));
@@ -286,7 +310,7 @@ function sleep(ms: number): Promise<void> {
 
 function handleCmuxError(c: { json: (body: unknown, status?: 400 | 404 | 500 | 503) => Response }, error: unknown) {
   if (error instanceof CmuxError) {
-    if (error.code === "SURFACE_NOT_FOUND" || error.code === "PANE_NOT_FOUND") {
+    if (error.code === "SURFACE_NOT_FOUND" || error.code === "PANE_NOT_FOUND" || error.code === "WORKSPACE_NOT_FOUND") {
       return c.json(apiError("NOT_FOUND", error.message), 404);
     }
     return c.json(apiError("CMUX_UNAVAILABLE", error.message), 503);

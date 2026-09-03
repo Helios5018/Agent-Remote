@@ -15,7 +15,10 @@ import {
   attentionGroupOf,
 } from "@car/protocol";
 import { formatAgo, formatDuration } from "@car/shared";
+import { APP_NAME_MAX_LENGTH, DEFAULT_HOME_TITLE } from "../appName.ts";
+import { EditableName } from "../components/EditableName.tsx";
 import { ControlToggle, TopBar } from "../components/TopBar.tsx";
+import { useAppName } from "../hooks/useAppName.tsx";
 import { agentsBySurface, useAppStore } from "../stores/AppStore.tsx";
 import type { Route } from "../hooks/useRouter.ts";
 
@@ -77,7 +80,10 @@ export function HomePage({
   /** 只看某一个 workspace（来自 #/w/:id 深链）。 */
   workspaceId?: string;
 }) {
-  const { inbox, tree, error, refreshInbox, refreshTree, subscribe, connection } = useAppStore();
+  const { inbox, tree, error, refreshInbox, refreshTree, subscribe, connection, session, renameWorkspace } =
+    useAppStore();
+  const controlMode = session?.controlMode === true;
+  const { homeTitle, setAppName } = useAppName();
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
   const [query, setQuery] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -184,13 +190,32 @@ export function HomePage({
     : "加载中…";
 
   const focusedWorkspace = workspaceId ? model[0]?.workspace : undefined;
-  const title = focusedWorkspace ? focusedWorkspace.title : "Agents";
+  const title = focusedWorkspace ? focusedWorkspace.title : homeTitle;
   // 搜索时强制展开，否则搜到的东西还藏在折叠里就没意义了。
   const forceExpand = keyword.length > 0;
 
   return (
     <div className="page">
-      <TopBar title={title} subtitle={summaryText} onBack={back} right={<ControlToggle />} />
+      <TopBar
+        title={title}
+        subtitle={summaryText}
+        onBack={back}
+        onRename={
+          focusedWorkspace
+            ? controlMode
+              ? (name) => {
+                  const next = name.trim();
+                  if (!next) return;
+                  void renameWorkspace(focusedWorkspace.id, next);
+                }
+              : undefined
+            : setAppName
+        }
+        renameMaxLength={focusedWorkspace ? 80 : APP_NAME_MAX_LENGTH}
+        renamePlaceholder={focusedWorkspace ? focusedWorkspace.title : DEFAULT_HOME_TITLE}
+        renameAriaLabel={focusedWorkspace ? "Workspace 名称" : "应用名称"}
+        right={<ControlToggle />}
+      />
 
       <div className="tree-toolbar">
         <div className="tree-search-wrap">
@@ -245,6 +270,15 @@ export function HomePage({
           loading={!tree}
           keyword={keyword}
           onToggle={toggle}
+          onRenameWorkspace={
+            controlMode
+              ? (id, name) => {
+                  const next = name.trim();
+                  if (!next) return;
+                  void renameWorkspace(id, next);
+                }
+              : undefined
+          }
           navigate={navigate}
         />
 
@@ -269,6 +303,7 @@ function TreeView({
   loading,
   keyword,
   onToggle,
+  onRenameWorkspace,
   navigate,
 }: {
   model: VisibleWorkspace[];
@@ -279,6 +314,7 @@ function TreeView({
   loading: boolean;
   keyword: string;
   onToggle: (key: string) => void;
+  onRenameWorkspace?: (workspaceId: string, name: string) => void;
   navigate: (route: Route) => void;
 }) {
   if (loading) return <div className="empty">加载 cmux 结构中…</div>;
@@ -304,9 +340,17 @@ function TreeView({
 
         return (
           <section className="ws-block" key={workspace.id}>
-            <button type="button" className="ws-header" onClick={() => onToggle(workspace.id)}>
+            <div className="ws-header" onClick={() => onToggle(workspace.id)}>
               <span className="caret">{expanded ? "▾" : "▸"}</span>
-              <span className="ws-name">{workspace.title}</span>
+              <EditableName
+                value={workspace.title}
+                onRename={onRenameWorkspace ? (name) => onRenameWorkspace(workspace.id, name) : undefined}
+                className={onRenameWorkspace ? "ws-name ws-name-edit" : "ws-name"}
+                inputClassName="ws-name-input"
+                maxLength={80}
+                placeholder={workspace.title}
+                ariaLabel="Workspace 名称"
+              />
               {workspace.selected ? <span className="chip chip-now">当前</span> : null}
               <span className="ws-counts">
                 {counts.NEEDS_YOU > 0 ? (
@@ -322,7 +366,7 @@ function TreeView({
                 ) : null}
               </span>
               <span className="mono dim ws-ref">{workspace.ref}</span>
-            </button>
+            </div>
 
             {expanded
               ? panes.map(({ pane, key, surfaces }) => {

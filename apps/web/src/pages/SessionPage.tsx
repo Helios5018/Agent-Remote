@@ -39,6 +39,7 @@ export function SessionPage({
     subscribe,
     sendInput,
     sendKey,
+    renameSurface,
     scrollSurface,
     loadHistory,
     refreshGrid,
@@ -200,7 +201,24 @@ export function SessionPage({
 
   return (
     <div className={`page session-page${immersive ? " immersive" : ""}`}>
-      <TopBar title={title} subtitle={surfaceRef} onBack={back} right={<ControlToggle />} />
+      <TopBar
+        title={title}
+        subtitle={surfaceRef}
+        onBack={back}
+        onRename={
+          controlMode
+            ? (name) => {
+                const next = name.trim();
+                if (!next || next === title) return;
+                void renameSurface(surfaceId, next);
+              }
+            : undefined
+        }
+        renameMaxLength={80}
+        renamePlaceholder={title}
+        renameAriaLabel="Surface 名称"
+        right={<ControlToggle />}
+      />
 
       <div className="session-header">
         <div className="session-agent">{kindLabel}</div>

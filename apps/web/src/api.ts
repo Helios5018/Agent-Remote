@@ -95,6 +95,18 @@ export const api = {
       body: JSON.stringify({ key, confirm }),
     }),
 
+  renameSurface: (surfaceId: string, title: string) =>
+    request<SurfaceWriteResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/title`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
+
+  renameWorkspace: (workspaceId: string, title: string) =>
+    request<SurfaceWriteResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/title`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
+
   /** 翻页：只读模式下也允许，响应里直接带回滚动后的新画面。 */
   scroll: (surfaceId: string, action: ScrollAction) =>
     request<SurfaceScrollResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/scroll`, {

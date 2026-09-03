@@ -85,6 +85,40 @@ body {
   text-overflow: ellipsis;
 }
 
+.topbar-title-edit {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  font-size: 17px;
+  text-align: left;
+  cursor: text;
+}
+
+.topbar-title-input {
+  display: block;
+  width: auto;
+  min-width: 3ch;
+  max-width: min(16em, 100%);
+  field-sizing: content;
+  margin: 0;
+  padding: 0 1px 1px;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 17px;
+  outline: none;
+}
+
 .topbar-title-sub {
   font-size: 12px;
   color: var(--text-dim);
@@ -314,6 +348,38 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ws-name-edit {
+  max-width: min(40vw, 16em);
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: text;
+}
+
+.ws-name-input {
+  display: block;
+  width: auto;
+  min-width: 3ch;
+  max-width: min(40vw, 16em);
+  field-sizing: content;
+  margin: 0;
+  padding: 0 1px 1px;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  outline: none;
 }
 
 .ws-counts {
@@ -699,9 +765,27 @@ body {
 /* ---------- 输入区 ---------- */
 
 .composer {
+  --composer-sheet-max: 70vh;
   border-top: 1px solid var(--border);
   background: var(--bg-elevated);
   padding: 10px 12px calc(10px + var(--safe-bottom));
+}
+
+/* 展开编辑：占掉下半屏，终端还留一截能瞄 */
+.composer.composer-editor-open {
+  height: var(--composer-sheet-max);
+  max-height: var(--composer-sheet-max);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.composer-editor-open .composer-hint,
+.composer-editor-open .composer-collapse,
+.composer-editor-open .key-bar-wrap {
+  flex: none;
 }
 
 .composer-hint {
@@ -749,21 +833,83 @@ body {
   align-items: flex-end;
 }
 
+.composer-editor-open .composer-input-row {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.composer-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.composer-editor-open .composer-input-wrap {
+  height: 100%;
+}
+
 .composer-input {
   flex: 1;
+  min-width: 0;
+  width: 100%;
   resize: none;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: #0d1014;
   color: var(--text);
-  padding: 10px 12px;
+  padding: 10px 34px 10px 12px;
   font: inherit;
   /* 16px 以上，iOS 才不会自动放大页面 */
   font-size: 16px;
+  line-height: 1.45;
+  min-height: calc(2 * 1.45em + 20px);
+  overflow-y: hidden;
+}
+
+.composer-editor-open .composer-input {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .composer-input:disabled {
   opacity: 0.5;
+}
+
+.composer-size-toggle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.composer-size-toggle:hover,
+.composer-size-toggle:focus-visible {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.composer-size-toggle:focus-visible {
+  outline: 1px solid var(--accent);
+}
+
+.composer-actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 
 .send-button {
@@ -997,6 +1143,12 @@ body {
   margin-top: 12px;
   color: var(--error);
   font-size: 13px;
+}
+
+@media (max-width: 767px) {
+  .composer {
+    --composer-sheet-max: 80vh;
+  }
 }
 
 @media (min-width: 768px) {

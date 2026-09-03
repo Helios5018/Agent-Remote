@@ -10,6 +10,8 @@ import {
 import {
   buildNewSurfaceArgs,
   buildReadScreenArgs,
+  buildRenameTabArgs,
+  buildRenameWorkspaceArgs,
   buildReplayArgs,
   buildScrollKeyArgs,
   buildSendKeyArgs,
@@ -205,6 +207,30 @@ export class CmuxCliClient implements CmuxClient {
       }
       throw new CmuxError(`翻页失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", message);
     }
+  }
+
+  async renameSurface(surfaceId: string, title: string): Promise<void> {
+    const result = await this.runner(buildRenameTabArgs(surfaceId, title), { timeoutMs: 8000 });
+    if (result.code !== 0) {
+      const message = result.stderr.trim();
+      if (/not found|no such|unknown surface|unknown tab/i.test(message)) {
+        throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND", message);
+      }
+      throw new CmuxError(`改 surface 名称失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", message);
+    }
+    this.invalidateTree();
+  }
+
+  async renameWorkspace(workspaceId: string, title: string): Promise<void> {
+    const result = await this.runner(buildRenameWorkspaceArgs(workspaceId, title), { timeoutMs: 8000 });
+    if (result.code !== 0) {
+      const message = result.stderr.trim();
+      if (/not found|no such|unknown workspace/i.test(message)) {
+        throw new CmuxError(`workspace 不存在: ${workspaceId}`, "WORKSPACE_NOT_FOUND", message);
+      }
+      throw new CmuxError(`改 workspace 名称失败: ${workspaceId}`, "CMUX_COMMAND_FAILED", message);
+    }
+    this.invalidateTree();
   }
 }
 

@@ -5,6 +5,8 @@ import {
   assertPaneTarget,
   assertSurfaceTarget,
   buildNewSurfaceArgs,
+  buildRenameTabArgs,
+  buildRenameWorkspaceArgs,
   buildSendKeyArgs,
   buildSendTextArgs,
 } from "../src/cmux/control.ts";
@@ -117,6 +119,30 @@ describe("CmuxCliClient", () => {
     const runner: CommandRunner = async () => ({ stdout: "", stderr: "unknown surface: surface:99", code: 1 });
     const client = new CmuxCliClient({ runner });
     await expect(client.readSurface("surface:99")).rejects.toMatchObject({ code: "SURFACE_NOT_FOUND" });
+  });
+
+  it("rename-tab / rename-workspace 走参数数组，不经过 shell", async () => {
+    expect(buildRenameTabArgs("SURF-11", "新名字")).toEqual([
+      "rename-tab",
+      "--surface",
+      "SURF-11",
+      "--title",
+      "新名字",
+    ]);
+    expect(buildRenameWorkspaceArgs("ws-1", "评测")).toEqual([
+      "rename-workspace",
+      "--workspace",
+      "ws-1",
+      "--",
+      "评测",
+    ]);
+
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner });
+    await client.renameSurface("SURF-11", "新名字");
+    await client.renameWorkspace("ws-1", "评测");
+    expect(calls.at(-2)).toEqual(["rename-tab", "--surface", "SURF-11", "--title", "新名字"]);
+    expect(calls.at(-1)).toEqual(["rename-workspace", "--workspace", "ws-1", "--", "评测"]);
   });
 
   it("sendText / sendKey 走参数数组，不经过 shell", async () => {

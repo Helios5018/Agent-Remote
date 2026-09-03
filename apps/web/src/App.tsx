@@ -1,3 +1,4 @@
+import { AppNameProvider } from "./hooks/useAppName.tsx";
 import { useRouter } from "./hooks/useRouter.ts";
 import { HomePage } from "./pages/HomePage.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
@@ -29,7 +30,9 @@ function Router() {
 export function App() {
   return (
     <AppStoreProvider>
-      <Router />
+      <AppNameProvider>
+        <Router />
+      </AppNameProvider>
     </AppStoreProvider>
   );
 }

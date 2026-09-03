@@ -62,6 +62,8 @@ interface AppStoreValue {
   /** 写操作失败会抛出 —— 调用方要据此保住用户没发出去的内容。 */
   sendInput(surfaceId: string, text: string, submit: boolean): Promise<void>;
   sendKey(surfaceId: string, key: CmuxKey, confirm?: boolean): Promise<void>;
+  renameSurface(surfaceId: string, title: string): Promise<void>;
+  renameWorkspace(workspaceId: string, title: string): Promise<void>;
   /** 翻页（只读模式下也可用），成功后网格直接被替换成滚动后的画面。 */
   scrollSurface(surfaceId: string, action: ScrollAction): Promise<void>;
   /** 拉网格之外更早的历史（纯文本）。 */
@@ -321,6 +323,30 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           const result = await api.sendKey(surfaceId, key, confirm);
           setError(null);
           noteControlRenewed(result.controlModeExpiresAt);
+        } catch (caught) {
+          noteApiError(caught);
+          throw caught;
+        }
+      },
+
+      async renameSurface(surfaceId: string, title: string) {
+        try {
+          const result = await api.renameSurface(surfaceId, title);
+          setError(null);
+          noteControlRenewed(result.controlModeExpiresAt);
+          await Promise.all([refreshTree(), refreshInbox()]);
+        } catch (caught) {
+          noteApiError(caught);
+          throw caught;
+        }
+      },
+
+      async renameWorkspace(workspaceId: string, title: string) {
+        try {
+          const result = await api.renameWorkspace(workspaceId, title);
+          setError(null);
+          noteControlRenewed(result.controlModeExpiresAt);
+          await Promise.all([refreshTree(), refreshInbox()]);
         } catch (caught) {
           noteApiError(caught);
           throw caught;

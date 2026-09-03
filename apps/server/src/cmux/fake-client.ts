@@ -1,9 +1,10 @@
 import type { CmuxKey, CmuxTree, GridSpan, ScrollKey, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
-import type {
-  CmuxClient,
-  CreatedSurface,
-  CreateSurfaceOptions,
-  ReadSurfaceOptions,
+import {
+  CmuxError,
+  type CmuxClient,
+  type CreatedSurface,
+  type CreateSurfaceOptions,
+  type ReadSurfaceOptions,
 } from "./client.ts";
 import { SnapshotTracker } from "./output.ts";
 
@@ -239,6 +240,18 @@ export class FakeCmuxClient implements CmuxClient {
 
   setWorkspaces(workspaces: FakeWorkspaceSpec[]): void {
     this.workspaces = workspaces;
+  }
+
+  async renameSurface(surfaceId: string, title: string): Promise<void> {
+    const surface = this.findSurface(surfaceId);
+    if (!surface) throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND");
+    surface.title = title;
+  }
+
+  async renameWorkspace(workspaceId: string, title: string): Promise<void> {
+    const workspace = this.workspaces.find((item) => item.id === workspaceId || item.ref === workspaceId);
+    if (!workspace) throw new CmuxError(`workspace 不存在: ${workspaceId}`, "WORKSPACE_NOT_FOUND");
+    workspace.title = title;
   }
 }
 

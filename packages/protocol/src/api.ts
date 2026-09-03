@@ -107,6 +107,12 @@ export const SurfaceWriteResponseSchema = z.object({
 });
 export type SurfaceWriteResponse = z.infer<typeof SurfaceWriteResponseSchema>;
 
+/** POST /api/surfaces/:surfaceId/title 与 POST /api/workspaces/:workspaceId/title */
+export const RenameTitleRequestSchema = z.object({
+  title: z.string().trim().min(1).max(80),
+});
+export type RenameTitleRequest = z.infer<typeof RenameTitleRequestSchema>;
+
 /**
  * POST /api/surfaces/:surfaceId/scroll —— 翻页。
  *
