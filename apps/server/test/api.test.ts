@@ -704,6 +704,23 @@ describe("新建 surface", () => {
     expect(harness.client.sentKeys).toEqual([{ surfaceId: body.surfaceId, key: "enter" }]);
   });
 
+  it("可以从白名单启动 Pi", async () => {
+    const harness = await createHarness();
+    const cookie = await harness.loginCookie();
+
+    const response = await harness.request("/api/surfaces", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ paneId: "pane-7", launch: "pi" }),
+    });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as CreateSurfaceResponse;
+
+    expect(body.launched).toBe("pi");
+    expect(harness.client.sentText).toEqual([{ surfaceId: body.surfaceId, text: "pi" }]);
+    expect(harness.client.sentKeys).toEqual([{ surfaceId: body.surfaceId, key: "enter" }]);
+  });
+
   it("launch 只收白名单，任意命令一律 400", async () => {
     const harness = await createHarness();
     const cookie = await harness.loginCookie();

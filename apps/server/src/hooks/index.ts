@@ -9,7 +9,7 @@ export { claudeAdapter } from "./claude.ts";
 export { codexAdapter } from "./codex.ts";
 export { grokAdapter } from "./grok.ts";
 
-export const HOOK_ADAPTERS: Record<AgentKind, HookAdapter> = {
+export const HOOK_ADAPTERS: Partial<Record<AgentKind, HookAdapter>> = {
   claude: claudeAdapter,
   codex: codexAdapter,
   grok: grokAdapter,
@@ -17,7 +17,7 @@ export const HOOK_ADAPTERS: Record<AgentKind, HookAdapter> = {
 
 /**
  * Agent Hook Adapter 总入口（需求文档 §14）：
- * 把三个 Agent 的事件翻译成统一语言。
+ * 把已接入 Hook 的 Agent 事件翻译成统一语言。
  */
 export function normalizeHook(agent: AgentKind, envelope: HookEnvelope, now: number): AgentEvent | null {
   const adapter = HOOK_ADAPTERS[agent];

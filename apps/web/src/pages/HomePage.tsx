@@ -405,7 +405,7 @@ function TreeView({
  * 在这个 pane 里新开一个 tab。
  *
  * 只建 terminal：cmux 自己的 agent-session 面板读不到画面，从手机上打开会是一片空白。
- * 起 Agent 走服务端白名单（Claude / Codex / Grok），这边只能选，不能传命令。
+ * 起 Agent 走服务端白名单（Claude / Codex / Grok / Pi），这边只能选，不能传命令。
  * 工作目录由服务端从同 pane 已有进程反查，所以手机上不用打路径。
  */
 function NewSurfaceRow({

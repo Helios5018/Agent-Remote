@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Mac 本地的多 Agent Web 控制中心：远程查看与控制运行在 cmux 中的 Claude Code / Codex / Grok",
+  "description": "Mac 本地的多 Agent Web 控制中心：远程查看与控制运行在 cmux 中的 Claude Code / Codex / Grok / Pi",
   "workspaces": [
     "apps/*",
     "packages/*"

@@ -49,7 +49,7 @@ export async function createHarness(options: { pin?: string; trustProxy?: boolea
     maxHistoryLines: 5000,
     // 测试用假 cmux，没有真的重绘要等
     scrollRedrawDelayMs: 0,
-    launchCommands: { claude: "c-d", codex: "codex-d", grok: "g-d" },
+    launchCommands: { claude: "c-d", codex: "codex-d", grok: "g-d", pi: "pi" },
   };
 
   const client = new FakeCmuxClient(undefined, now);

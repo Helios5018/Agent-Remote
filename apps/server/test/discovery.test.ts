@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentSurfaces, flattenSurfaces, parseTopJson, parseTree } from "../src/cmux/discovery.ts";
+import { agentSurfaces, detectAgentInSurface, flattenSurfaces, parseTopJson, parseTree } from "../src/cmux/discovery.ts";
 import { RAW_TOP, RAW_TREE } from "./fixtures.ts";
 
 const NOW = 1_700_000_000_000;
@@ -37,6 +37,22 @@ describe("cmux Agent Process Discovery", () => {
     const claude = flattenSurfaces(tree).find((s) => s.id === "SURF-20");
     expect(claude?.agent).toBe("claude");
     expect(claude?.agentPid).toBe(7001);
+  });
+
+  it("识别 cmux 原生分类和进程名里的 Pi", () => {
+    const native = parseTopJson({
+      coding_agents: [{ id: "pi", resources: { pids: [9001] } }],
+    });
+    expect(native.pidToAgent.get(9001)).toBe("pi");
+
+    const fallback = detectAgentInSurface(
+      {
+        surfaceRef: "surface:pi",
+        processes: [{ pid: 9002, name: "pi", path: "/opt/homebrew/bin/pi", children: [] }],
+      },
+      new Map(),
+    );
+    expect(fallback).toEqual({ kind: "pi", pid: 9002 });
   });
 
   it("纯 shell 的 surface 不算 Agent", () => {

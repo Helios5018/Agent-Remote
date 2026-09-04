@@ -1,4 +1,4 @@
-import type { CmuxKey, CmuxTree, GridSpan, ScrollKey, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
+import type { AgentKind, CmuxKey, CmuxTree, GridSpan, ScrollKey, SurfaceGrid, SurfaceSnapshot } from "@car/protocol";
 import {
   CmuxError,
   type CmuxClient,
@@ -19,7 +19,7 @@ export interface FakeSurfaceSpec {
   id: string;
   ref: string;
   title: string;
-  agent: "claude" | "codex" | "grok" | null;
+  agent: AgentKind | null;
   pid?: number;
   content: string;
   /** 视口之上更早的历史，用来演示翻页与「加载更早的历史」。 */

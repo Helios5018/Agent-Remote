@@ -53,7 +53,7 @@ export function createSurfaceRoutes(ctx: AppContext) {
       if (launch) {
         // 新 shell 刚被唤醒，还在跑 .zshrc；太早打字有可能被吞掉。
         await sleep(LAUNCH_DELAY_MS);
-        // 命令来自服务端白名单，前端只能选 claude/codex/grok。
+        // 命令来自服务端白名单，前端只能选 claude/codex/grok/pi。
         await ctx.client.sendText(surface.surfaceId, ctx.config.launchCommands[launch]);
         await ctx.client.sendKey(surface.surfaceId, "enter");
       }

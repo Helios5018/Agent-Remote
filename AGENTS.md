@@ -1,6 +1,6 @@
 # CMUX Agent Remote
 
-Mac 本地的多 Agent Web 控制中心：通过浏览器 / 手机查看并控制 cmux 里的 Claude Code、Codex CLI、Grok Build。不是远程 Terminal，核心是「谁在干活、谁在等你」。用法与 API 以 README.md 为准。
+Mac 本地的多 Agent Web 控制中心：通过浏览器 / 手机查看并控制 cmux 里的 Claude Code、Codex CLI、Grok Build、Pi。不是远程 Terminal，核心是「谁在干活、谁在等你」。用法与 API 以 README.md 为准。
 
 ## 怎么跑
 

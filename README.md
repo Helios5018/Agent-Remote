@@ -1,6 +1,6 @@
 # CMUX Agent Remote
 
-> 运行在 Mac 上、通过 Web 和手机远程查看与控制 Claude Code、Codex 和 Grok Build 的多 Agent Control Center。
+> 运行在 Mac 上、通过 Web 和手机远程查看与控制 Claude Code、Codex、Grok Build 和 Pi 的多 Agent Control Center。
 
 它的核心不是远程 Terminal，而是：**随时知道哪个 Agent 在做什么、哪个 Agent 在等你，并能够立即接手。**
 
@@ -186,15 +186,16 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 
 ### 新建 surface
 
-首页每个 pane 底部有「＋ 新建 surface」，可以选 Shell / Claude / Codex / Grok，
+首页每个 pane 底部有「＋ 新建 surface」，可以选 Shell / Claude / Codex / Grok / Pi，
 建完直接跳进会话页（Mac 上不会抢焦点）。三条约束：
 
 - **只建 terminal**。`cmux new-surface --type agent-session` 建出来的是 cmux 自己的
   Agent 面板，`read-screen` 报 "Surface is not a terminal"、`terminal.replay` 直接
   not_found —— 在这边既看不到画面也发不了输入。要新开一个 Agent，就是建 terminal 再敲命令。
 - **`launch` 是白名单枚举，不是命令字符串**。收任意命令等于在公网上送一个远程 shell。
-  实际执行的命令在服务端配置：默认 `c-d` / `codex-d` / `g-d`（`~/.zshrc` 里带跳过确认参数的别名，
-  手机上没法一路点确认），可用 `CAR_LAUNCH_CLAUDE` / `CAR_LAUNCH_CODEX` / `CAR_LAUNCH_GROK` 覆盖。
+  实际执行的命令在服务端配置：默认 `c-d` / `codex-d` / `g-d` / `pi`（前三个通常是
+  `~/.zshrc` 里带跳过确认参数的别名，手机上没法一路点确认），可用 `CAR_LAUNCH_CLAUDE` /
+  `CAR_LAUNCH_CODEX` / `CAR_LAUNCH_GROK` / `CAR_LAUNCH_PI` 覆盖。
 - **`paneId` 必填且要真实存在**。写操作一律显式指定目标，服务端不认「当前 pane」。
 
 首页每一行右边有 ×，点两次确认后走 `cmux close-surface`，关的是 Mac 上那个真实 tab
@@ -324,7 +325,8 @@ WebSocket `/ws`：
 
 ## Hook
 
-三家 Agent 的用户级 hook 最终都调用同一个脚本：
+Claude、Codex、Grok 三家的用户级 hook 最终都调用同一个脚本。Pi 当前已支持进程识别、
+终端查看控制和输出变化状态推断，精确生命周期 Hook 将通过 Pi Extension 接入。
 
 ```bash
 scripts/cmux-agent-web-hook <claude|codex|grok> <NativeEventName>

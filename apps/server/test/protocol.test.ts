@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentEventSchema,
+  AGENT_DISPLAY_NAME,
+  AGENT_KINDS,
   ALLOWED_KEYS,
   ATTENTION_PRIORITY,
   attentionGroupOf,
@@ -43,6 +45,11 @@ describe("统一状态模型（§8）", () => {
 });
 
 describe("统一事件（§10）", () => {
+  it("支持四种 Agent，包括 Pi", () => {
+    expect([...AGENT_KINDS]).toEqual(["claude", "codex", "grok", "pi"]);
+    expect(AGENT_DISPLAY_NAME.pi).toBe("Pi");
+  });
+
   it("接受完整事件", () => {
     const parsed = AgentEventSchema.safeParse({
       version: 1,

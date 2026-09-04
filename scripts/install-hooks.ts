@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { AGENT_KINDS, type AgentKind } from "@car/protocol";
+import type { AgentKind } from "@car/protocol";
 import { installHooks, HOOK_TARGETS } from "./hooks-config.ts";
 
 /**
@@ -38,9 +38,10 @@ function main(): void {
   const homeIndex = argv.indexOf("--home");
   const home = homeIndex >= 0 ? (argv[homeIndex + 1] ?? homedir()) : homedir();
   const agentIndex = argv.indexOf("--agent");
+  const hookKinds = new Set<string>(HOOK_TARGETS.map((target) => target.agent));
   const only =
     agentIndex >= 0
-      ? (argv[agentIndex + 1]?.split(",").filter((a): a is AgentKind => (AGENT_KINDS as string[]).includes(a)) ?? [])
+      ? (argv[agentIndex + 1]?.split(",").filter((a): a is AgentKind => hookKinds.has(a)) ?? [])
       : undefined;
 
   const scriptPath = resolve(here, "cmux-agent-web-hook");
@@ -59,7 +60,7 @@ function main(): void {
     home,
     scriptPath,
     dryRun,
-    only: only && only.length > 0 ? only : undefined,
+    only: agentIndex >= 0 ? only : undefined,
     force,
     hasBinary,
   });

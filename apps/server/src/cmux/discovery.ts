@@ -33,6 +33,7 @@ const CODING_AGENT_ID_MAP: Record<string, AgentKind> = {
   "claude-code": "claude",
   codex: "codex",
   grok: "grok",
+  pi: "pi",
 };
 
 /** 兜底：按进程名 / 路径识别。 */
@@ -40,6 +41,7 @@ const PROCESS_PATTERNS: Array<{ kind: AgentKind; re: RegExp }> = [
   { kind: "claude", re: /(^|\/)claude(-code)?$/i },
   { kind: "codex", re: /(^|\/)codex(-[\w.]+)?$/i },
   { kind: "grok", re: /(^|\/)grok(-[\w.]+)?$/i },
+  { kind: "pi", re: /(^|\/)pi$/i },
 ];
 
 function matchProcessName(name: string | undefined, path: string | undefined): AgentKind | null {

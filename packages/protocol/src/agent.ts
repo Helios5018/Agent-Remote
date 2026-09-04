@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** 第一阶段支持的三个 Agent。 */
-export const AgentKindSchema = z.enum(["claude", "codex", "grok"]);
+/** 当前支持的 Agent。 */
+export const AgentKindSchema = z.enum(["claude", "codex", "grok", "pi"]);
 export type AgentKind = z.infer<typeof AgentKindSchema>;
 
 export const AGENT_KINDS: readonly AgentKind[] = AgentKindSchema.options;
@@ -10,11 +10,12 @@ export const AGENT_DISPLAY_NAME: Record<AgentKind, string> = {
   claude: "Claude",
   codex: "Codex",
   grok: "Grok",
+  pi: "Pi",
 };
 
 /**
  * 统一 Agent 状态（需求文档 §8）。
- * 三家 Agent 的原生 Hook 各不相同，但系统内部只认这一组。
+ * 各 Agent 的原生 Hook 各不相同，但系统内部只认这一组。
  */
 export const AgentStatusSchema = z.enum([
   "WORKING",
