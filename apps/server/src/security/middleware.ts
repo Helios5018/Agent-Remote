@@ -47,26 +47,6 @@ export function requireAuth(ctx: AppContext): MiddlewareHandler<Env> {
 }
 
 /**
- * 控制模式校验（需求文档 §23.2）：默认只读，写操作必须显式开启 CONTROL MODE。
- */
-export function requireControl(ctx: AppContext): MiddlewareHandler<Env> {
-  return async (c: Context<Env>, next: Next) => {
-    const session = c.get("session");
-    if (!ctx.sessions.hasControl(session)) {
-      return c.json(
-        apiError("READ_ONLY", "当前是只读模式，请先开启 Control Mode"),
-        403,
-      );
-    }
-    // 过了校验就续期，长时间不操作才会自动回到只读。
-    // 刻意放在 next() 之前：handler 要把续期后的到期时间写进响应
-    // （SurfaceWriteResponse），放到后面就来不及了。
-    ctx.sessions.touchControl(session);
-    await next();
-  };
-}
-
-/**
  * 请求是不是本机直连。
  * 带 X-Forwarded-For 说明经过了代理 / Tunnel，一律不算本机。
  */

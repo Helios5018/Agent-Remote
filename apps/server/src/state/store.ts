@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
--- 只存 session id 与时间戳；控制模式不持久化，重启后一律回到只读。
+-- 只存 session id 与时间戳；重启后手机端不用重新输 PIN。
 CREATE TABLE IF NOT EXISTS web_sessions (
   id           TEXT PRIMARY KEY,
   created_at   INTEGER NOT NULL,

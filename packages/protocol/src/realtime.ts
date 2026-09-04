@@ -33,7 +33,6 @@ export const SurfaceGridMessageSchema = z.object({
 export const HelloMessageSchema = z.object({
   type: z.literal("hello"),
   serverVersion: z.string(),
-  controlMode: z.boolean(),
   now: z.number(),
 });
 

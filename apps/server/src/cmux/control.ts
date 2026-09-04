@@ -65,8 +65,7 @@ export function buildSendKeyArgs(surfaceId: string, key: CmuxKey): string[] {
 }
 
 /**
- * 翻页。走的还是 send-key，但语义上只是换一屏来看，
- * 所以在 API 层不要求控制模式（见 `SurfaceScrollRequestSchema`）。
+ * 翻页。走的还是 send-key，但语义上只是换一屏来看（见 `SurfaceScrollRequestSchema`）。
  */
 export function buildScrollKeyArgs(surfaceId: string, key: ScrollKey): string[] {
   assertSurfaceTarget(surfaceId);
@@ -104,6 +103,17 @@ export function buildRenameWorkspaceArgs(workspaceId: string, title: string): st
   assertWorkspaceTarget(workspaceId);
   // rename-workspace 没有 --title，只有位置参数；--title 会被当成名字写进去。
   return ["rename-workspace", "--workspace", workspaceId, "--", title];
+}
+
+/**
+ * 关掉 surface。必须显式带 surface，绝不允许落到「当前焦点 tab」。
+ * workspace 上下文用来定位跨 workspace 的 UUID；同 workspace 时可不传。
+ */
+export function buildCloseSurfaceArgs(surfaceId: string, workspaceId?: string): string[] {
+  assertSurfaceTarget(surfaceId);
+  const args = ["close-surface", "--surface", surfaceId];
+  if (workspaceId) args.push("--workspace", workspaceId);
+  return args;
 }
 
 export const TREE_ARGS = ["tree", "--all", "--json", "--id-format", "both"];

@@ -8,13 +8,11 @@ import type {
   SurfaceHistoryResponse,
   SurfaceScrollResponse,
   SurfaceSnapshot,
-  SurfaceWriteResponse,
   TreeResponse,
 } from "@car/protocol";
 import { GRID_SPAN_TEXT } from "@car/protocol";
 import {
   createHarness,
-  loginWithControl,
   TEST_HOOK_TOKEN,
   TEST_PANE_CWD,
   TEST_PIN,
@@ -52,8 +50,7 @@ describe("安全：Access Token 与 Session", () => {
     expect(good.headers.get("set-cookie")).toMatch(/HttpOnly/i);
 
     const info = (await good.json()) as SessionInfo;
-    // 默认只读（§23.2）
-    expect(info).toMatchObject({ authenticated: true, controlMode: false });
+    expect(info).toMatchObject({ authenticated: true });
   });
 
   it("Cookie 之后即可访问", async () => {
@@ -230,106 +227,26 @@ describe("安全：登录限流（4 位 PIN 的前提）", () => {
   });
 });
 
-describe("安全：Read / Control Mode（§23.2）", () => {
-  it("只读模式下写操作被拒绝", async () => {
+describe("安全：登录后即可控制", () => {
+  it("登录后写操作直接放行", async () => {
     const harness = await createHarness();
     const cookie = await harness.loginCookie();
-
-    const input = await harness.request("/api/surfaces/sf-11/input", {
-      method: "POST",
-      cookie,
-      body: JSON.stringify({ text: "hi", submit: true }),
-    });
-    expect(input.status).toBe(403);
-    expect(await input.json()).toMatchObject({ error: { code: "READ_ONLY" } });
-    expect(harness.client.sentText).toHaveLength(0);
-
-    const rename = await harness.request("/api/surfaces/sf-11/title", {
-      method: "POST",
-      cookie,
-      body: JSON.stringify({ title: "不该改成功" }),
-    });
-    expect(rename.status).toBe(403);
-  });
-
-  it("显式开启控制模式后可以写", async () => {
-    const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
     const response = await harness.request("/api/surfaces/sf-11/input", {
       method: "POST",
       cookie,
       body: JSON.stringify({ text: "继续完成这个任务", submit: true }),
     });
     expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true });
     expect(harness.client.sentText).toEqual([{ surfaceId: "sf-11", text: "继续完成这个任务" }]);
     expect(harness.client.sentKeys).toEqual([{ surfaceId: "sf-11", key: "enter" }]);
-  });
-
-  it("长时间不操作后自动回到只读", async () => {
-    const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
-    harness.clock.advance(61_000);
-
-    const response = await harness.request("/api/surfaces/sf-11/key", {
-      method: "POST",
-      cookie,
-      body: JSON.stringify({ key: "escape" }),
-    });
-    expect(response.status).toBe(403);
-  });
-
-  it("持续操作会续期控制模式", async () => {
-    const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
-
-    harness.clock.advance(50_000);
-    expect(
-      (
-        await harness.request("/api/surfaces/sf-11/key", {
-          method: "POST",
-          cookie,
-          body: JSON.stringify({ key: "escape" }),
-        })
-      ).status,
-    ).toBe(200);
-
-    harness.clock.advance(50_000);
-    expect(
-      (
-        await harness.request("/api/surfaces/sf-11/key", {
-          method: "POST",
-          cookie,
-          body: JSON.stringify({ key: "tab" }),
-        })
-      ).status,
-    ).toBe(200);
-  });
-
-  it("写操作的响应带回续期后的到期时间", async () => {
-    const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
-    harness.clock.advance(30_000);
-
-    const response = await harness.request("/api/surfaces/sf-11/input", {
-      method: "POST",
-      cookie,
-      body: JSON.stringify({ text: "hi", submit: true }),
-    });
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as SurfaceWriteResponse;
-
-    // 前端拿这个时间点做本地倒计时；对不上的话 CONTROL 徽标会比服务端先过期，
-    // 用户看着还亮着 CONTROL，一点发送却被 403 顶回来。
-    const info = (await (await harness.request("/api/auth/session", { cookie })).json()) as SessionInfo;
-    expect(body.controlModeExpiresAt).toBe(info.controlModeExpiresAt);
-    expect(body.controlModeExpiresAt).toBe(harness.clock.value + 60_000);
   });
 });
 
 describe("安全：按键白名单与危险操作确认（§22 / §23.4）", () => {
   it("只允许 Enter / Esc / Tab / ↑ / ↓ / Ctrl+C", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
 
     for (const key of ["enter", "escape", "tab", "up", "down", "left", "right"]) {
       const response = await harness.request("/api/surfaces/sf-11/key", {
@@ -352,7 +269,7 @@ describe("安全：按键白名单与危险操作确认（§22 / §23.4）", () 
 
   it("Ctrl+C 必须二次确认", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
 
     const first = await harness.request("/api/surfaces/sf-11/key", {
       method: "POST",
@@ -374,7 +291,7 @@ describe("安全：按键白名单与危险操作确认（§22 / §23.4）", () 
 
   it("Ctrl+D 不在白名单里，带 confirm 也发不出去", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
 
     const response = await harness.request("/api/surfaces/sf-11/key", {
       method: "POST",
@@ -387,7 +304,7 @@ describe("安全：按键白名单与危险操作确认（§22 / §23.4）", () 
 
   it("写操作必须落在具体 surface 上，路径缺 surface 直接 404", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
     const response = await harness.request("/api/surfaces//input", {
       method: "POST",
       cookie,
@@ -398,7 +315,7 @@ describe("安全：按键白名单与危险操作确认（§22 / §23.4）", () 
 
   it("不存在的 surface 返回 404 且不会误伤别人", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
     const response = await harness.request("/api/surfaces/sf-does-not-exist/input", {
       method: "POST",
       cookie,
@@ -432,9 +349,9 @@ describe("API：Agents / Tree / Output", () => {
     expect(tree.workspaces[0]?.panes[1]?.surfaces[0]?.agent).toBeNull();
   });
 
-  it("控制模式下可以改 surface / workspace 名称，并写回拓扑", async () => {
+  it("可以改 surface / workspace 名称，并写回拓扑", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
 
     const surface = await harness.request("/api/surfaces/sf-11/title", {
       method: "POST",
@@ -494,9 +411,8 @@ describe("API：Agents / Tree / Output", () => {
 });
 
 describe("API：回看历史（翻页 + 更早的纯文本）", () => {
-  it("翻页只读模式也能用，并直接带回滚动后的画面", async () => {
+  it("翻页直接带回滚动后的画面", async () => {
     const harness = await createHarness();
-    // 注意是 loginCookie 而不是 loginWithControl：翻页不写内容，不该要控制模式
     const cookie = await harness.loginCookie();
 
     const before = (await (await harness.request("/api/surfaces/sf-11/grid", { cookie })).json()) as SurfaceGrid;
@@ -709,7 +625,7 @@ describe("实时推送与 API 的联动", () => {
 
   it("发送 prompt 后订阅者收到 Working 状态", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
     const messages: Array<{ type: string; status?: string }> = [];
     harness.ctx.hub.add((message) => messages.push(message as { type: string; status?: string }));
 
@@ -727,7 +643,7 @@ describe("实时推送与 API 的联动", () => {
 describe("审计（§23.5）", () => {
   it("写操作被记录，但不落 prompt 原文", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
     await harness.request("/api/surfaces/sf-11/input", {
       method: "POST",
       cookie,
@@ -743,21 +659,9 @@ describe("审计（§23.5）", () => {
 });
 
 describe("新建 surface", () => {
-  it("只读模式下不能新建", async () => {
+  it("登录后建一个 shell：带上反查到的工作目录，并出现在拓扑里", async () => {
     const harness = await createHarness();
     const cookie = await harness.loginCookie();
-    const response = await harness.request("/api/surfaces", {
-      method: "POST",
-      cookie,
-      body: JSON.stringify({ paneId: "pane-7" }),
-    });
-    expect(response.status).toBe(403);
-    expect(harness.client.created).toHaveLength(0);
-  });
-
-  it("控制模式下建一个 shell：带上反查到的工作目录，并出现在拓扑里", async () => {
-    const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
 
     const response = await harness.request("/api/surfaces", {
       method: "POST",
@@ -769,8 +673,6 @@ describe("新建 surface", () => {
     const body = (await response.json()) as CreateSurfaceResponse;
     expect(body).toMatchObject({ ok: true, cwd: TEST_PANE_CWD, launched: null });
     expect(body.surfaceId).toBeTruthy();
-    // 建 surface 也是写操作，同样要把续期后的到期时间带回去
-    expect(typeof body.controlModeExpiresAt).toBe("number");
     expect(harness.client.created).toEqual([
       { paneId: "pane-7", workspaceId: "ws-world-model", cwd: TEST_PANE_CWD },
     ]);
@@ -788,7 +690,7 @@ describe("新建 surface", () => {
 
   it("选了 Agent 就在新 tab 里敲白名单命令", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
 
     const response = await harness.request("/api/surfaces", {
       method: "POST",
@@ -804,7 +706,7 @@ describe("新建 surface", () => {
 
   it("launch 只收白名单，任意命令一律 400", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
     const response = await harness.request("/api/surfaces", {
       method: "POST",
       cookie,
@@ -816,7 +718,7 @@ describe("新建 surface", () => {
 
   it("pane 必填，且必须在当前拓扑里真实存在", async () => {
     const harness = await createHarness();
-    const cookie = await loginWithControl(harness);
+    const cookie = await harness.loginCookie();
 
     const missing = await harness.request("/api/surfaces", {
       method: "POST",
@@ -832,6 +734,67 @@ describe("新建 surface", () => {
     });
     expect(unknown.status).toBe(404);
     expect(harness.client.created).toHaveLength(0);
+  });
+});
+
+describe("关闭 surface", () => {
+  it("没有 confirm 不能关", async () => {
+    const harness = await createHarness();
+    const cookie = await harness.loginCookie();
+    const response = await harness.request("/api/surfaces/sf-11/close", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({}),
+    });
+    expect(response.status).toBe(428);
+    expect(harness.client.closed).toHaveLength(0);
+  });
+
+  it("确认后从 cmux 拓扑里拿掉，不是只在前端藏起来", async () => {
+    const harness = await createHarness();
+    const cookie = await harness.loginCookie();
+    const response = await harness.request("/api/surfaces/sf-11/close", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ confirm: true }),
+    });
+    expect(response.status).toBe(200);
+    expect(harness.client.closed).toEqual(["sf-11"]);
+
+    const tree = (await (await harness.request("/api/tree", { cookie })).json()) as TreeResponse;
+    const ids = tree.workspaces.flatMap((ws) => ws.panes.flatMap((pane) => pane.surfaces.map((s) => s.id)));
+    expect(ids).not.toContain("sf-11");
+    expect(ids).toContain("sf-10");
+
+    const audit = harness.store.recentAudit(10).find((entry) => entry.action === "surface.close");
+    expect(audit?.surfaceId).toBe("sf-11");
+  });
+
+  it("workspace 最后一个 surface 关不掉", async () => {
+    const harness = await createHarness();
+    harness.client.setWorkspaces([
+      {
+        id: "ws-only",
+        ref: "workspace:1",
+        title: "only",
+        panes: [
+          {
+            ref: "pane:1",
+            id: "pane-1",
+            surfaces: [{ id: "sf-only", ref: "surface:1", title: "only", agent: null, content: "$ " }],
+          },
+        ],
+      },
+    ]);
+    const cookie = await harness.loginCookie();
+    const response = await harness.request("/api/surfaces/sf-only/close", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ confirm: true }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "LAST_SURFACE" } });
+    expect(harness.client.closed).toHaveLength(0);
   });
 });
 

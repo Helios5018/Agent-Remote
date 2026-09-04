@@ -74,7 +74,7 @@ Workspace ── Pane ── Surface ── Agent
 - 搜索框按 workspace / surface 名过滤，搜索时自动展开命中项
 - 折叠状态、筛选条件存在 localStorage，刷新和重连都不会丢
 - 折叠的 workspace 标题上仍会显示 `2 需要你` / `1 运行中` / `+3`（被隐藏的 surface 数）
-- 非 Agent 的 surface 也能点开只读查看输出
+- 非 Agent 的 surface 也能点开查看输出、发输入
 
 标题一律 **surface 名为主、workspace 名为辅**（`▤ workspace`）—— surface 名才是你在 cmux
 标签上看到的那行字。
@@ -125,7 +125,7 @@ apps/server/src/
 ├── state/       store(SQLite) / engine(大脑) / stale(时间规则)
 ├── realtime/    hub(运行时无关) / poller(分级刷新) / websocket(Bun 绑定)
 ├── api/         agents / workspaces / surfaces / hooks / auth
-└── security/    token / session / control mode / 中间件
+└── security/    token / session / 中间件
 
 apps/web/src/    React + Vite，移动优先，无第三方路由与状态库
 packages/protocol/  Zod schema + 类型（前后端共享）
@@ -160,14 +160,14 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 |------|------|------|
 | `GET` | `/api/health` | 健康检查（无需登录） |
 | `POST` | `/api/auth/login` | PIN 换 Session Cookie（带限流） |
-| `GET` | `/api/auth/session` | 当前登录态与控制模式 |
+| `GET` | `/api/auth/session` | 当前登录态 |
 | `POST` | `/api/auth/logout` | 退出登录 |
-| `POST` | `/api/auth/control` | 开启 / 关闭控制模式 |
 | `GET` | `/api/agents` | Attention Inbox（分组 + 汇总） |
 | `GET` | `/api/agents/:surfaceId` | Agent 详情 + 输出快照（并标记已读） |
 | `POST` | `/api/agents/:surfaceId/read` | 显式标记已读 |
 | `GET` | `/api/tree` | cmux 完整结构 |
 | `POST` | `/api/surfaces` | `{ paneId, workspaceId?, launch? }` 在指定 pane 里新建 terminal surface |
+| `POST` | `/api/surfaces/:surfaceId/close` | `{ confirm: true }` 关掉 cmux 里的真实 tab（进程一起没） |
 | `GET` | `/api/surfaces/:surfaceId/output` | 读取输出（纯文本） |
 | `GET` | `/api/surfaces/:surfaceId/grid` | 读取彩色渲染网格 |
 | `GET` | `/api/surfaces/:surfaceId/history` | 网格之外更早的历史（纯文本，`?drop=` 去掉与网格重叠的尾部） |
@@ -180,8 +180,7 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
 允许的按键：`enter` `escape` `tab` `up` `down` `left` `right` `ctrl+c`。
 按键条在手机上是单行横滑的。不提供 `ctrl+d`：实测对着 shell 发 EOF 会直接把 surface 关掉。
 
-`/scroll` 是唯一**只读模式也放行**的写向接口：翻页不往终端里写内容，只是让终端里的程序
-换一屏来画，把它挡在控制模式后面等于「想回看历史先解锁」，不值当。它也不收 `home` / `end`
+`/scroll` 翻页不往终端里写内容，只是让终端里的程序换一屏来画。它不收 `home` / `end`
 —— 那两个键 cmux 虽然认，但对 Claude Code 画面纹丝不动，对 shell 又变成移动光标。
 `bottom` 没有对应按键，是服务端连按 `pagedown` 直到画面不再变化（最多 12 步）。
 
@@ -197,6 +196,10 @@ scripts/         cmux-agent-web-hook（真正跑在 Agent 里的 shell）+ 安�
   实际执行的命令在服务端配置：默认 `c-d` / `codex-d` / `g-d`（`~/.zshrc` 里带跳过确认参数的别名，
   手机上没法一路点确认），可用 `CAR_LAUNCH_CLAUDE` / `CAR_LAUNCH_CODEX` / `CAR_LAUNCH_GROK` 覆盖。
 - **`paneId` 必填且要真实存在**。写操作一律显式指定目标，服务端不认「当前 pane」。
+
+首页每一行右边有 ×，点两次确认后走 `cmux close-surface`，关的是 Mac 上那个真实 tab
+（里面的 Agent / shell 一起没）。这不是前端列表过滤。cmux **不允许关掉一个 workspace
+里最后一个 surface**；那种情况按钮是灰的。分屏里最后一个 tab 可以关，关完那个 pane 会消失。
 
 两个 cmux 侧的坑已经在 adapter 里处理掉了：新 tab 是**懒启动**的，没被激活过就没有 tty，
 读画面会报 `internal_error: Failed to read terminal text` —— 所以建完先发一次回车把 shell
@@ -270,7 +273,7 @@ WebSocket `/ws`：
 { "type": "ping" }
 
 // 服务端 → 客户端
-{ "type": "hello", "serverVersion": "0.1.0", "controlMode": false, "now": 0 }
+{ "type": "hello", "serverVersion": "0.1.0", "now": 0 }
 { "type": "agent.status_changed", "surfaceId": "…", "status": "NEEDS_APPROVAL", "agent": { … } }
 { "type": "agent.list_changed", "inbox": { … } }
 { "type": "surface.snapshot", "surfaceId": "…", "revision": 128, "content": "…" }  // 纯文本，给后台变化检测
@@ -291,7 +294,7 @@ WebSocket `/ws`：
   触发锁定时服务端终端打印告警，`--unlock` 可手动解锁。
 - **两把钥匙分开**：人用的是短 PIN，Hook 用的是长随机密钥，且 Hook 接口**只接受本机回环**
   请求（带 `X-Forwarded-For` 的一律拒绝）—— PIN 短不会连累 Hook 接口。
-- **默认只读**：写操作必须显式开启 Control Mode，15 分钟无操作自动回到只读；重启后一律回到只读。
+- **登录即控制**：PIN 过了就能读写；不再分只读 / 控制模式，也没有超时回落。
 - **所有写操作必须指定 surface**：不存在 "send to current terminal"，服务端强制校验。
 - **危险操作二次确认**：`Ctrl+C` 未带 `confirm` 返回 `428`。
 - **防注入**：所有 cmux 调用走参数数组 + `--`，不经过 shell。

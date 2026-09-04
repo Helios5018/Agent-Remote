@@ -1,5 +1,6 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import {
+  CloseSurfaceRequestSchema,
   CreateSurfaceRequestSchema,
   isDangerousKey,
   RenameTitleRequestSchema,
@@ -7,15 +8,14 @@ import {
   SurfaceKeyRequestSchema,
   SurfaceScrollRequestSchema,
   type CmuxPane,
+  type CmuxWorkspace,
   type CreateSurfaceResponse,
   type ScrollKey,
   type SurfaceGrid,
-  type SurfaceWriteResponse,
 } from "@car/protocol";
 import { apiError, type AppContext } from "../context.ts";
 import { CmuxError } from "../cmux/client.ts";
 import { resolvePaneCwd } from "../cmux/cwd.ts";
-import { requireControl, type Env } from "../security/middleware.ts";
 import { safeJson } from "./auth.ts";
 
 /**
@@ -23,7 +23,7 @@ import { safeJson } from "./auth.ts";
  * 所有写操作都在 URL 里显式指定 surface，服务端不存在 "current terminal" 概念。
  */
 export function createSurfaceRoutes(ctx: AppContext) {
-  const app = new Hono<Env>();
+  const app = new Hono();
 
   /**
    * 在指定 pane 里新建一个 terminal surface，可选顺手起一个 Agent。
@@ -31,7 +31,7 @@ export function createSurfaceRoutes(ctx: AppContext) {
    * 挂在集合根上而不是 /:surfaceId/xxx —— 建之前还没有 surface。
    * 但「写操作必须显式指定目标」的规矩照旧：paneId 必填，且必须在当前拓扑里真实存在。
    */
-  app.post("/", requireControl(ctx), async (c) => {
+  app.post("/", async (c) => {
     const parsed = CreateSurfaceRequestSchema.safeParse(await safeJson(c.req.raw));
     if (!parsed.success) return c.json(apiError("BAD_REQUEST", "参数不合法"), 400);
     const { paneId, workspaceId, launch } = parsed.data;
@@ -66,8 +66,6 @@ export function createSurfaceRoutes(ctx: AppContext) {
         workspaceId: surface.workspaceId ?? found.workspaceId,
         cwd: cwd ?? null,
         launched: launch,
-        // 和 input / key 一样带回续期后的到期时间，前端的 CONTROL 倒计时才跟得上。
-        controlModeExpiresAt: writeResponse(ctx, c).controlModeExpiresAt,
       };
     } catch (error) {
       return handleCmuxError(c, error);
@@ -137,8 +135,7 @@ export function createSurfaceRoutes(ctx: AppContext) {
   });
 
   /**
-   * 翻页。故意不加 requireControl：翻页不往终端写任何东西，
-   * 只是让终端 / TUI 换一屏来画，只读模式下也应该能回看历史。
+   * 翻页。不往终端写任何东西，只是让终端 / TUI 换一屏来画。
    */
   app.post("/:surfaceId/scroll", async (c) => {
     const surfaceId = c.req.param("surfaceId");
@@ -158,7 +155,7 @@ export function createSurfaceRoutes(ctx: AppContext) {
     }
   });
 
-  app.post("/:surfaceId/input", requireControl(ctx), async (c) => {
+  app.post("/:surfaceId/input", async (c) => {
     const surfaceId = c.req.param("surfaceId");
     const parsed = SurfaceInputRequestSchema.safeParse(await safeJson(c.req.raw));
     if (!parsed.success) return c.json(apiError("BAD_REQUEST", "参数不合法"), 400);
@@ -189,10 +186,10 @@ export function createSurfaceRoutes(ctx: AppContext) {
     }
     ctx.poller?.scheduleImmediate(surfaceId);
 
-    return c.json(writeResponse(ctx, c));
+    return c.json({ ok: true as const });
   });
 
-  app.post("/:surfaceId/title", requireControl(ctx), async (c) => {
+  app.post("/:surfaceId/title", async (c) => {
     const surfaceId = c.req.param("surfaceId");
     const parsed = RenameTitleRequestSchema.safeParse(await safeJson(c.req.raw));
     if (!parsed.success) return c.json(apiError("BAD_REQUEST", "名称不合法"), 400);
@@ -212,10 +209,43 @@ export function createSurfaceRoutes(ctx: AppContext) {
       detail: `len=${parsed.data.title.length}`,
     });
     ctx.hub.broadcast({ type: "agent.list_changed", inbox: ctx.engine.inbox() });
-    return c.json(writeResponse(ctx, c));
+    return c.json({ ok: true as const });
   });
 
-  app.post("/:surfaceId/key", requireControl(ctx), async (c) => {
+  /**
+   * 关掉 cmux 里的真实 tab。进程一起没，不是前端列表里藏起来。
+   * workspace 最后一个 surface 关不掉（cmux `invalid_state`）。
+   */
+  app.post("/:surfaceId/close", async (c) => {
+    const surfaceId = c.req.param("surfaceId");
+    const parsed = CloseSurfaceRequestSchema.safeParse(await safeJson(c.req.raw));
+    if (!parsed.success) {
+      return c.json(apiError("CONFIRM_REQUIRED", "关闭 surface 需要二次确认"), 428);
+    }
+
+    let workspaceId: string | undefined;
+    try {
+      const tree = await ctx.client.getTree();
+      const found = findSurfaceInTree(tree.workspaces, surfaceId);
+      if (!found) return c.json(apiError("NOT_FOUND", `surface 不存在: ${surfaceId}`), 404);
+      const total = found.workspace.panes.reduce((sum, pane) => sum + pane.surfaces.length, 0);
+      if (total <= 1) {
+        return c.json(apiError("LAST_SURFACE", "这是这个 workspace 里最后一个 surface，cmux 不允许关掉"), 409);
+      }
+      workspaceId = found.workspace.id;
+      await ctx.client.closeSurface(surfaceId, workspaceId);
+      const next = await ctx.client.getTree();
+      ctx.engine.syncTree(next);
+    } catch (error) {
+      return handleCmuxError(c, error);
+    }
+
+    ctx.store.audit({ at: ctx.now(), action: "surface.close", surfaceId, detail: `workspace=${workspaceId}` });
+    ctx.hub.broadcast({ type: "agent.list_changed", inbox: ctx.engine.inbox() });
+    return c.json({ ok: true as const });
+  });
+
+  app.post("/:surfaceId/key", async (c) => {
     const surfaceId = c.req.param("surfaceId");
     const parsed = SurfaceKeyRequestSchema.safeParse(await safeJson(c.req.raw));
     if (!parsed.success) {
@@ -236,22 +266,10 @@ export function createSurfaceRoutes(ctx: AppContext) {
 
     ctx.store.audit({ at: ctx.now(), action: "surface.key", surfaceId, detail: key });
     ctx.poller?.scheduleImmediate(surfaceId);
-    return c.json(writeResponse(ctx, c));
+    return c.json({ ok: true as const });
   });
 
   return app;
-}
-
-/**
- * 写操作成功后，把续期后的控制模式到期时间带回去。
- * 前端拿它续本地倒计时，CONTROL 徽标才会和服务端同一时刻回落。
- */
-function writeResponse(ctx: AppContext, c: Context<Env>): SurfaceWriteResponse {
-  const session = c.get("session");
-  return {
-    ok: true as const,
-    controlModeExpiresAt: ctx.sessions.hasControl(session) ? session.controlUntil : undefined,
-  };
 }
 
 /** 按 UUID 或 pane:N 短引用找 pane；短引用会重复，所以带 workspace 时先缩范围。 */
@@ -308,12 +326,33 @@ function sleep(ms: number): Promise<void> {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
 
-function handleCmuxError(c: { json: (body: unknown, status?: 400 | 404 | 500 | 503) => Response }, error: unknown) {
+function handleCmuxError(
+  c: { json: (body: unknown, status?: 400 | 404 | 409 | 500 | 503) => Response },
+  error: unknown,
+) {
   if (error instanceof CmuxError) {
+    if (error.code === "LAST_SURFACE") {
+      return c.json(apiError("LAST_SURFACE", error.message), 409);
+    }
     if (error.code === "SURFACE_NOT_FOUND" || error.code === "PANE_NOT_FOUND" || error.code === "WORKSPACE_NOT_FOUND") {
       return c.json(apiError("NOT_FOUND", error.message), 404);
     }
     return c.json(apiError("CMUX_UNAVAILABLE", error.message), 503);
   }
   return c.json(apiError("INTERNAL", "cmux 操作失败"), 500);
+}
+
+/** 按 UUID 或 surface:N 短引用找 surface，并带回所属 workspace。 */
+function findSurfaceInTree(
+  workspaces: CmuxWorkspace[],
+  surfaceId: string,
+): { workspace: CmuxWorkspace } | null {
+  for (const workspace of workspaces) {
+    for (const pane of workspace.panes) {
+      if (pane.surfaces.some((surface) => surface.id === surfaceId || surface.ref === surfaceId)) {
+        return { workspace };
+      }
+    }
+  }
+  return null;
 }

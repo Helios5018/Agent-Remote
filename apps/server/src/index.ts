@@ -67,8 +67,7 @@ async function main(): Promise<void> {
 
   const sessions = new SessionManager({
     token: config.pin,
-    controlTtlMs: config.controlTtlMs,
-    // 重启后手机端不用重新输 Token；控制模式不持久化，一律回到只读。
+    // 重启后手机端不用重新输 PIN。
     persistence: {
       load: () => store.loadSessions(),
       save: (session) => store.saveSession(session),

@@ -34,7 +34,7 @@ export class RealtimeHub {
     this.onViewingChanged = options.onViewingChanged;
   }
 
-  add(send: (message: ServerMessage) => void, close: () => void = () => {}, controlMode = false): HubClient {
+  add(send: (message: ServerMessage) => void, close: () => void = () => {}): HubClient {
     const client: HubClient = {
       id: `c${this.nextId++}`,
       viewing: null,
@@ -43,7 +43,7 @@ export class RealtimeHub {
     };
     this.clients.set(client.id, client);
     try {
-      client.send({ type: "hello", serverVersion: SERVER_VERSION, controlMode, now: this.now() });
+      client.send({ type: "hello", serverVersion: SERVER_VERSION, now: this.now() });
     } catch {
       // 连接刚建立就断了，交给上层的 close 流程处理
     }

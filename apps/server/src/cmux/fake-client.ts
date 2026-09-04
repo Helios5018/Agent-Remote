@@ -38,6 +38,7 @@ export class FakeCmuxClient implements CmuxClient {
   readonly sentKeys: Array<{ surfaceId: string; key: CmuxKey }> = [];
   readonly sentScrolls: Array<{ surfaceId: string; key: ScrollKey }> = [];
   readonly created: CreateSurfaceOptions[] = [];
+  readonly closed: string[] = [];
   private nextSurfaceSeq = 0;
   private readonly snapshots = new SnapshotTracker();
   private readonly gridRevisions = new Map<string, { content: string; revision: number }>();
@@ -252,6 +253,26 @@ export class FakeCmuxClient implements CmuxClient {
     const workspace = this.workspaces.find((item) => item.id === workspaceId || item.ref === workspaceId);
     if (!workspace) throw new CmuxError(`workspace 不存在: ${workspaceId}`, "WORKSPACE_NOT_FOUND");
     workspace.title = title;
+  }
+
+  async closeSurface(surfaceId: string, _workspaceId?: string): Promise<void> {
+    for (const workspace of this.workspaces) {
+      const total = workspace.panes.reduce((sum, pane) => sum + pane.surfaces.length, 0);
+      for (const pane of workspace.panes) {
+        const hit = pane.surfaces.some((surface) => surface.id === surfaceId || surface.ref === surfaceId);
+        if (!hit) continue;
+        if (total <= 1) {
+          throw new CmuxError("这是这个 workspace 里最后一个 surface，cmux 不允许关掉", "LAST_SURFACE");
+        }
+        pane.surfaces = pane.surfaces.filter((surface) => surface.id !== surfaceId && surface.ref !== surfaceId);
+        this.closed.push(surfaceId);
+        if (pane.surfaces.length === 0) {
+          workspace.panes = workspace.panes.filter((item) => item !== pane);
+        }
+        return;
+      }
+    }
+    throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND");
   }
 }
 

@@ -55,6 +55,12 @@ export interface CmuxClient {
 
   /** 改 workspace 在 cmux 里的真实标题。 */
   renameWorkspace(workspaceId: string, title: string): Promise<void>;
+
+  /**
+   * 关掉一个 surface（cmux 里的真实 tab，进程一起没）。
+   * workspace 里最后一个 surface 关不掉，cmux 会报 invalid_state。
+   */
+  closeSurface(surfaceId: string, workspaceId?: string): Promise<void>;
 }
 
 export interface CreateSurfaceOptions {
@@ -88,7 +94,8 @@ export class CmuxError extends Error {
       | "CMUX_COMMAND_FAILED"
       | "SURFACE_NOT_FOUND"
       | "PANE_NOT_FOUND"
-      | "WORKSPACE_NOT_FOUND",
+      | "WORKSPACE_NOT_FOUND"
+      | "LAST_SURFACE",
     readonly detail?: string,
   ) {
     super(message);

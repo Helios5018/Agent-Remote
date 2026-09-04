@@ -78,12 +78,10 @@ function SizeGlyph({ expanded }: { expanded: boolean }) {
 }
 
 export function Composer({
-  disabled,
   collapsible = false,
   onSend,
   onKey,
 }: {
-  disabled: boolean;
   /** 沉浸模式下先收成一条，点开才展开 —— 输入框 + 按键条在手机上要吃掉小半屏。 */
   collapsible?: boolean;
   onSend: (text: string, submit: boolean) => Promise<void>;
@@ -164,11 +162,8 @@ export function Composer({
     if (editorOpen || (collapsible && expanded)) textareaRef.current?.focus();
   }, [editorOpen, collapsible, expanded]);
 
-  // 重新开启（或退出）控制模式就把上一次的失败提示收掉
-  useEffect(() => setFailure(null), [disabled]);
-
   const send = async (submit: boolean) => {
-    if (busy || disabled) return;
+    if (busy) return;
     const value = text;
     if (value.trim().length === 0 && submit === false) return;
     setBusy(true);
@@ -186,7 +181,7 @@ export function Composer({
   };
 
   const pressKey = async (key: CmuxKey) => {
-    if (busy || disabled) return;
+    if (busy) return;
     // 危险操作二次确认（需求文档 §23.4）
     if (isDangerousKey(key) && pendingKey !== key) {
       setPendingKey(key);
@@ -209,11 +204,9 @@ export function Composer({
     return (
       <div className="composer composer-collapsed">
         <button type="button" className="composer-expand" onClick={() => setExpanded(true)}>
-          {disabled
-            ? "只读模式 · 点这里展开输入区"
-            : preview
-              ? `继续编辑：${preview}${text.trim().length > 40 ? "…" : ""}`
-              : "点这里输入…"}
+          {preview
+            ? `继续编辑：${preview}${text.trim().length > 40 ? "…" : ""}`
+            : "点这里输入…"}
         </button>
       </div>
     );
@@ -234,7 +227,6 @@ export function Composer({
           收起 ⌄
         </button>
       ) : null}
-      {disabled ? <div className="composer-hint">只读模式：点击右上角 READ ONLY 开启控制</div> : null}
       {failure ? <div className="composer-hint danger-hint">{failure}</div> : null}
       <div className="composer-input-row">
         <div className="composer-input-wrap">
@@ -244,7 +236,7 @@ export function Composer({
             value={text}
             rows={2}
             placeholder="输入消息……"
-            disabled={disabled || busy}
+            disabled={busy}
             onChange={(event) => setText(event.target.value)}
             onPaste={(event) => {
               const pasted = event.clipboardData?.getData("text") ?? "";
@@ -281,7 +273,7 @@ export function Composer({
           <button
             type="button"
             className="send-button"
-            disabled={disabled || busy || text.trim().length === 0}
+            disabled={busy || text.trim().length === 0}
             onClick={() => void send(true)}
           >
             Send
@@ -307,7 +299,7 @@ export function Composer({
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  disabled={disabled || busy}
+                  disabled={busy}
                   onClick={() => void pressKey(key)}
                 >
                   {pendingKey === key ? "确认?" : label}

@@ -163,24 +163,6 @@ body {
   background: var(--error);
 }
 
-.control-toggle {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-
-.control-toggle.on {
-  border-color: var(--accent);
-  color: #0b0d10;
-  background: var(--accent);
-}
-
 /* ---------- 列表 ---------- */
 
 .scroll-area {
@@ -483,27 +465,74 @@ body {
 
 .surface-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+  margin: 0 0 6px 12px;
+  width: calc(100% - 12px);
   background: var(--bg-row);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 9px 12px;
-  margin: 0 0 6px 12px;
-  width: calc(100% - 12px);
+  color: inherit;
+}
+
+.surface-row.muted {
+  opacity: 0.62;
+}
+
+.surface-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 9px 8px 9px 12px;
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
 
-.surface-row:active {
+.surface-open:active {
   background: #171c22;
 }
 
-.surface-row.muted {
-  opacity: 0.62;
+.surface-close {
+  flex: none;
+  align-self: center;
+  min-width: 36px;
+  min-height: 36px;
+  margin-right: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.surface-close.armed {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--error);
+  min-width: auto;
+  padding: 0 8px;
+}
+
+.surface-close:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.surface-close-note {
+  flex-basis: 100%;
+  padding: 0 12px 8px;
+  font-size: 12px;
+  color: var(--error);
 }
 
 .surface-glyph {

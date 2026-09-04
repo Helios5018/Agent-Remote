@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PORT, type AgentKind } from "@car/protocol";
-import { DEFAULT_CONTROL_TTL_MS, MIN_PIN_LENGTH } from "./security/token.ts";
+import { MIN_PIN_LENGTH } from "./security/token.ts";
 
 export interface ServerConfig {
   host: string;
@@ -16,7 +16,6 @@ export interface ServerConfig {
   dbPath: string;
   /** 前端构建产物目录；不存在时只提供 API。 */
   staticDir: string;
-  controlTtlMs: number;
   staleAfterMs: number;
   /**
    * 部署在 Tunnel / 反向代理后面时打开：
@@ -64,7 +63,6 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     dataDir,
     dbPath: env["CAR_DB"] ?? join(dataDir, "state.db"),
     staticDir: env["CAR_STATIC_DIR"] ?? "",
-    controlTtlMs: Number(env["CAR_CONTROL_TTL_MS"] ?? DEFAULT_CONTROL_TTL_MS),
     staleAfterMs: Number(env["CAR_STALE_AFTER_MS"] ?? 10 * 60 * 1000),
     trustProxy: env["CAR_TRUST_PROXY"] === "1",
     demo: env["CAR_DEMO"] === "1",

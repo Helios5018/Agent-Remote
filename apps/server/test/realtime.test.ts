@@ -181,6 +181,7 @@ describe("Poller 刷新策略（§18）", () => {
       readHistory: (id: string, lines: number) => client.readHistory(id, lines),
       renameSurface: (id: string, title: string) => client.renameSurface(id, title),
       renameWorkspace: (id: string, title: string) => client.renameWorkspace(id, title),
+      closeSurface: (id: string, workspaceId?: string) => client.closeSurface(id, workspaceId),
       readSurface: async () => {
         throw new Error("read-screen timeout");
       },

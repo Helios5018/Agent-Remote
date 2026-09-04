@@ -280,37 +280,6 @@ describe("SessionManager", () => {
     expect(sessions.get(session?.id)).toBe(session);
   });
 
-  it("默认只读，显式开启后才有控制权", () => {
-    let clock = 1_000_000;
-    const sessions = new SessionManager({ token: "4271", controlTtlMs: 1000, now: () => clock });
-    const session = sessions.login("4271")!;
-    expect(sessions.hasControl(session)).toBe(false);
-
-    sessions.setControlMode(session, true);
-    expect(sessions.hasControl(session)).toBe(true);
-
-    clock += 1500;
-    expect(sessions.hasControl(session)).toBe(false);
-  });
-
-  it("有操作就续期，没操作就自动回到只读", () => {
-    let clock = 1_000_000;
-    const sessions = new SessionManager({ token: "4271", controlTtlMs: 1000, now: () => clock });
-    const session = sessions.login("4271")!;
-    sessions.setControlMode(session, true);
-
-    clock += 800;
-    sessions.touchControl(session);
-    clock += 800;
-    expect(sessions.hasControl(session)).toBe(true);
-
-    clock += 1200;
-    expect(sessions.hasControl(session)).toBe(false);
-    // 已经过期之后再 touch 不该复活
-    sessions.touchControl(session);
-    expect(sessions.hasControl(session)).toBe(false);
-  });
-
   it("登出后 Session 立即失效", () => {
     const sessions = new SessionManager({ token: "4271", now });
     const session = sessions.login("4271")!;
@@ -318,7 +287,7 @@ describe("SessionManager", () => {
     expect(sessions.get(session.id)).toBeNull();
   });
 
-  it("Session 可持久化，但控制模式重启后一定回到只读", () => {
+  it("Session 可持久化，重启后不用重新输 PIN", () => {
     const rows: Array<{ id: string; createdAt: number; lastSeenAt: number }> = [];
     const persistence: SessionPersistence = {
       load: () => rows,
@@ -335,13 +304,12 @@ describe("SessionManager", () => {
 
     const first = new SessionManager({ token: "4271", now, persistence });
     const session = first.login("4271")!;
-    first.setControlMode(session, true);
     expect(rows).toHaveLength(1);
 
     const restarted = new SessionManager({ token: "4271", now, persistence });
     const restored = restarted.get(session.id);
     expect(restored).not.toBeNull();
-    expect(restarted.hasControl(restored)).toBe(false);
+    expect(restored?.id).toBe(session.id);
   });
 
   it("过期很久的 Session 不会被恢复", () => {

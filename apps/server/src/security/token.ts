@@ -5,11 +5,10 @@ import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
  *
  * 这个系统本质上拥有远程控制终端的能力，所以第一版就必须：
  * - 有 Access Token
- * - 默认只读，控制模式显式开启且会超时回落
+ * - 登录后即可读写（PIN + 限流兜底）
  */
 
 export const SESSION_COOKIE = "car_session";
-export const DEFAULT_CONTROL_TTL_MS = 15 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** PIN 允许的长度范围：4 位够短到能记住，靠限流兜底；更长更安全。 */
@@ -53,13 +52,11 @@ export interface Session {
   id: string;
   createdAt: number;
   lastSeenAt: number;
-  /** 控制模式到期时间；<= now 视为只读。 */
-  controlUntil: number;
 }
 
 /**
  * Session 的持久化钩子。
- * 重启服务后手机端不用重新输 Token；但控制模式永远不持久化，重启一律回到只读。
+ * 重启服务后手机端不用重新输 PIN。
  */
 export interface SessionPersistence {
   load(): Array<{ id: string; createdAt: number; lastSeenAt: number }>;
@@ -69,7 +66,6 @@ export interface SessionPersistence {
 
 export interface SessionManagerOptions {
   token: string;
-  controlTtlMs?: number;
   now?: () => number;
   persistence?: SessionPersistence;
 }
@@ -78,12 +74,10 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly now: () => number;
   private readonly persistence?: SessionPersistence;
-  readonly controlTtlMs: number;
   readonly token: string;
 
   constructor(options: SessionManagerOptions) {
     this.token = options.token;
-    this.controlTtlMs = options.controlTtlMs ?? DEFAULT_CONTROL_TTL_MS;
     this.now = options.now ?? Date.now;
     this.persistence = options.persistence;
     this.restore();
@@ -97,7 +91,7 @@ export class SessionManager {
         this.persistence.remove(row.id);
         continue;
       }
-      this.sessions.set(row.id, { ...row, controlUntil: 0 });
+      this.sessions.set(row.id, { ...row });
     }
   }
 
@@ -109,7 +103,6 @@ export class SessionManager {
       id: randomBytes(24).toString("base64url"),
       createdAt: now,
       lastSeenAt: now,
-      controlUntil: 0,
     };
     this.sessions.set(session.id, session);
     this.persistence?.save(session);
@@ -128,22 +121,6 @@ export class SessionManager {
     }
     session.lastSeenAt = now;
     return session;
-  }
-
-  /** 显式开启 / 关闭控制模式。 */
-  setControlMode(session: Session, enabled: boolean): Session {
-    session.controlUntil = enabled ? this.now() + this.controlTtlMs : 0;
-    return session;
-  }
-
-  /** 每次成功的写操作都续期，一段时间无操作以后自动回到只读。 */
-  touchControl(session: Session): void {
-    if (this.hasControl(session)) session.controlUntil = this.now() + this.controlTtlMs;
-  }
-
-  hasControl(session: Session | null): boolean {
-    if (!session) return false;
-    return session.controlUntil > this.now();
   }
 
   logout(sessionId: string): void {

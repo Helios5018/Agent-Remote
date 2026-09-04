@@ -29,10 +29,10 @@ export interface AppContext {
 
 export type ApiErrorCode =
   | "UNAUTHORIZED"
-  | "READ_ONLY"
   | "BAD_REQUEST"
   | "NOT_FOUND"
   | "CONFIRM_REQUIRED"
+  | "LAST_SURFACE"
   | "TOO_MANY_ATTEMPTS"
   | "CMUX_UNAVAILABLE"
   | "INTERNAL";

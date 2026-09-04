@@ -1,8 +1,8 @@
 import { Hono } from "hono";
-import { RenameTitleRequestSchema, type SurfaceWriteResponse } from "@car/protocol";
+import { RenameTitleRequestSchema } from "@car/protocol";
 import { apiError, type AppContext } from "../context.ts";
 import { CmuxError } from "../cmux/client.ts";
-import { requireControl, type Env } from "../security/middleware.ts";
+import { type Env } from "../security/middleware.ts";
 import { safeJson } from "./auth.ts";
 
 /** GET /api/tree —— cmux 真实结构：Workspace → Pane → Surface（需求文档 §6 / §22）。 */
@@ -30,7 +30,7 @@ export function createWorkspaceRoutes(ctx: AppContext) {
 export function createWorkspaceWriteRoutes(ctx: AppContext) {
   const app = new Hono<Env>();
 
-  app.post("/:workspaceId/title", requireControl(ctx), async (c) => {
+  app.post("/:workspaceId/title", async (c) => {
     const workspaceId = c.req.param("workspaceId");
     const parsed = RenameTitleRequestSchema.safeParse(await safeJson(c.req.raw));
     if (!parsed.success) return c.json(apiError("BAD_REQUEST", "名称不合法"), 400);
@@ -57,12 +57,7 @@ export function createWorkspaceWriteRoutes(ctx: AppContext) {
       detail: `workspace=${workspaceId} len=${parsed.data.title.length}`,
     });
     ctx.hub.broadcast({ type: "agent.list_changed", inbox: ctx.engine.inbox() });
-    const session = c.get("session");
-    const body: SurfaceWriteResponse = {
-      ok: true,
-      controlModeExpiresAt: ctx.sessions.hasControl(session) ? session.controlUntil : undefined,
-    };
-    return c.json(body);
+    return c.json({ ok: true as const });
   });
 
   return app;

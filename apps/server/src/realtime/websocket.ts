@@ -58,7 +58,6 @@ export function createWebSocketHandlers(ctx: AppContext) {
         const client = ctx.hub.add(
           (message: ServerMessage) => ws.send(JSON.stringify(message)),
           () => ws.close(),
-          false,
         );
         ws.data.clientId = client.id;
         clients.set(client.id, client);

@@ -58,9 +58,6 @@ export const api = {
 
   logout: () => request<SessionInfo>("/api/auth/logout", { method: "POST" }),
 
-  setControlMode: (enabled: boolean) =>
-    request<SessionInfo>("/api/auth/control", { method: "POST", body: JSON.stringify({ enabled }) }),
-
   agents: () => request<Inbox>("/api/agents"),
 
   agent: (surfaceId: string) => request<AgentDetailResponse>(`/api/agents/${encodeURIComponent(surfaceId)}`),
@@ -89,6 +86,13 @@ export const api = {
       body: JSON.stringify({ text, submit }),
     }),
 
+  /** 关掉 cmux 里的真实 tab。confirm 必须为 true。 */
+  closeSurface: (surfaceId: string) =>
+    request<SurfaceWriteResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/close`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: true }),
+    }),
+
   sendKey: (surfaceId: string, key: CmuxKey, confirm = false) =>
     request<SurfaceWriteResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/key`, {
       method: "POST",
@@ -107,7 +111,7 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
 
-  /** 翻页：只读模式下也允许，响应里直接带回滚动后的新画面。 */
+  /** 翻页：响应里直接带回滚动后的新画面。 */
   scroll: (surfaceId: string, action: ScrollAction) =>
     request<SurfaceScrollResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/scroll`, {
       method: "POST",

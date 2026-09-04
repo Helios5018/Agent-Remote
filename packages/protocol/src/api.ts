@@ -9,22 +9,12 @@ export const LoginRequestSchema = z.object({
 });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
-/** 会话能力：默认只读，需要显式开启控制模式（需求文档 §23.2）。 */
+/** 会话：登录后即可读写，不再分只读 / 控制模式。 */
 export const SessionInfoSchema = z.object({
   authenticated: z.boolean(),
-  controlMode: z.boolean(),
-  /** 控制模式到期时间戳；只读时为 undefined。 */
-  controlModeExpiresAt: z.number().optional(),
-  controlModeTtlMs: z.number(),
   serverVersion: z.string(),
 });
 export type SessionInfo = z.infer<typeof SessionInfoSchema>;
-
-/** POST /api/auth/control */
-export const ControlModeRequestSchema = z.object({
-  enabled: z.boolean(),
-});
-export type ControlModeRequest = z.infer<typeof ControlModeRequestSchema>;
 
 /** GET /api/agents */
 export const AgentsResponseSchema = InboxSchema;
@@ -75,8 +65,6 @@ export const CreateSurfaceResponseSchema = z.object({
   /** 服务端替它选的工作目录；反查不到时为 null（cmux 用自己的默认值）。 */
   cwd: z.string().nullable(),
   launched: AgentKindSchema.nullable(),
-  /** 建 surface 也是写操作，同样带回续期后的到期时间（见 SurfaceWriteResponse）。 */
-  controlModeExpiresAt: z.number().optional(),
 });
 export type CreateSurfaceResponse = z.infer<typeof CreateSurfaceResponseSchema>;
 
@@ -95,17 +83,18 @@ export const SurfaceKeyRequestSchema = z.object({
 });
 export type SurfaceKeyRequest = z.infer<typeof SurfaceKeyRequestSchema>;
 
-/**
- * 写操作（input / key）的响应。
- *
- * 带上续期后的控制模式到期时间：服务端每次写操作都会续期，
- * 前端只有跟着续，界面上的 CONTROL 才不会比服务端先「过期」。
- */
+/** 写操作（input / key / 改名）的响应。 */
 export const SurfaceWriteResponseSchema = z.object({
   ok: z.literal(true),
-  controlModeExpiresAt: z.number().optional(),
 });
 export type SurfaceWriteResponse = z.infer<typeof SurfaceWriteResponseSchema>;
+
+/** POST /api/surfaces/:surfaceId/close —— 关掉 cmux 里的真实 tab。 */
+export const CloseSurfaceRequestSchema = z.object({
+  /** 关掉 tab 会干掉里面的进程，必须显式确认。 */
+  confirm: z.literal(true),
+});
+export type CloseSurfaceRequest = z.infer<typeof CloseSurfaceRequestSchema>;
 
 /** POST /api/surfaces/:surfaceId/title 与 POST /api/workspaces/:workspaceId/title */
 export const RenameTitleRequestSchema = z.object({
@@ -116,7 +105,7 @@ export type RenameTitleRequest = z.infer<typeof RenameTitleRequestSchema>;
 /**
  * POST /api/surfaces/:surfaceId/scroll —— 翻页。
  *
- * 和 /key 分开：翻页只改「看到哪一屏」，不往终端里写东西，所以只读模式也允许。
+ * 和 /key 分开：翻页只改「看到哪一屏」，不往终端里写东西。
  */
 export const SurfaceScrollRequestSchema = z.object({
   action: ScrollActionSchema,

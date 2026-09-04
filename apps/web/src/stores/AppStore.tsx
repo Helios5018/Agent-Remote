@@ -45,7 +45,6 @@ interface AppStoreValue {
 
   login(token: string): Promise<void>;
   logout(): Promise<void>;
-  setControlMode(enabled: boolean): Promise<void>;
   refreshInbox(): Promise<void>;
   refreshTree(): Promise<void>;
   openSession(surfaceId: string): Promise<AgentState | null>;
@@ -64,7 +63,9 @@ interface AppStoreValue {
   sendKey(surfaceId: string, key: CmuxKey, confirm?: boolean): Promise<void>;
   renameSurface(surfaceId: string, title: string): Promise<void>;
   renameWorkspace(workspaceId: string, title: string): Promise<void>;
-  /** 翻页（只读模式下也可用），成功后网格直接被替换成滚动后的画面。 */
+  /** 关掉 cmux 里的真实 tab；失败会抛出。 */
+  closeSurface(surfaceId: string): Promise<void>;
+  /** 翻页，成功后网格直接被替换成滚动后的画面。 */
   scrollSurface(surfaceId: string, action: ScrollAction): Promise<void>;
   /** 拉网格之外更早的历史（纯文本）。 */
   loadHistory(surfaceId: string, drop: number): Promise<SurfaceHistoryResponse | null>;
@@ -111,28 +112,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const { state: connection, subscribe } = useRealtime({ enabled: authenticated, onMessage: handleMessage });
 
-  /**
-   * 统一处理接口错误。
-   *
-   * 401 / READ_ONLY 都要顺手把本地会话状态改对：控制模式在服务端会静默过期，
-   * 徽标要是还停在 CONTROL，用户就会对着一个「假 CONTROL」反复点发送。
-   */
+  /** 统一处理接口错误。401 要把本地会话标成未登录。 */
   const noteApiError = useCallback((caught: unknown) => {
     if (caught instanceof ApiError) {
       if (caught.status === 401) setSession((s) => (s ? { ...s, authenticated: false } : null));
-      if (caught.code === "READ_ONLY") {
-        setSession((s) => (s ? { ...s, controlMode: false, controlModeExpiresAt: undefined } : s));
-      }
       setError(caught.message);
     } else {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, []);
-
-  /** 服务端每次写操作都会给控制模式续期，本地倒计时跟着走。 */
-  const noteControlRenewed = useCallback((expiresAt: number | undefined) => {
-    if (!expiresAt) return;
-    setSession((s) => (s?.controlMode ? { ...s, controlModeExpiresAt: expiresAt } : s));
   }, []);
 
   const withError = useCallback(
@@ -208,22 +195,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, [authenticated, connection, refreshInbox]);
 
-  /*
-   * 控制模式到点自动回落。
-   *
-   * 服务端过期是静默的，前端不自己倒计时的话徽标会一直亮着 CONTROL，
-   * 用户要等到点了发送被 403 才知道 —— 那一下的内容还发不出去。
-   */
-  useEffect(() => {
-    const expiresAt = session?.controlModeExpiresAt;
-    if (session?.controlMode !== true || !expiresAt) return;
-    const timer = window.setTimeout(
-      () => setSession((s) => (s ? { ...s, controlMode: false, controlModeExpiresAt: undefined } : s)),
-      Math.max(0, expiresAt - Date.now()),
-    );
-    return () => window.clearTimeout(timer);
-  }, [session?.controlMode, session?.controlModeExpiresAt]);
-
   const value = useMemo<AppStoreValue>(
     () => ({
       session,
@@ -248,17 +219,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setGrids({});
       },
 
-      async setControlMode(enabled: boolean) {
-        const info = await withError(() => api.setControlMode(enabled));
-        if (info) setSession(info);
-      },
-
       refreshInbox,
       refreshTree,
 
       async openSession(surfaceId: string) {
         // 非 Agent 的 surface（shell / browser）没有 Agent 状态，
-        // 但仍然允许只读查看，所以 404 不算错误，直接退化成读输出。
+        // 但照样能看画面、发输入，所以 404 不算错误，直接退化成读输出。
         let detail: Awaited<ReturnType<typeof api.agent>> | null = null;
         try {
           detail = await api.agent(surfaceId);
@@ -291,7 +257,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         try {
           const result = await api.createSurface(paneId, workspaceId, launch);
           setError(null);
-          noteControlRenewed(result.controlModeExpiresAt);
           // 新 tab 得立刻出现在结构树里，否则跳过去会看到「找不到 surface」。
           await refreshTree();
           return result;
@@ -309,9 +274,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
        */
       async sendInput(surfaceId: string, text: string, submit: boolean) {
         try {
-          const result = await api.sendInput(surfaceId, text, submit);
+          await api.sendInput(surfaceId, text, submit);
           setError(null);
-          noteControlRenewed(result.controlModeExpiresAt);
         } catch (caught) {
           noteApiError(caught);
           throw caught;
@@ -320,9 +284,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       async sendKey(surfaceId: string, key: CmuxKey, confirm = false) {
         try {
-          const result = await api.sendKey(surfaceId, key, confirm);
+          await api.sendKey(surfaceId, key, confirm);
           setError(null);
-          noteControlRenewed(result.controlModeExpiresAt);
         } catch (caught) {
           noteApiError(caught);
           throw caught;
@@ -331,9 +294,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       async renameSurface(surfaceId: string, title: string) {
         try {
-          const result = await api.renameSurface(surfaceId, title);
+          await api.renameSurface(surfaceId, title);
           setError(null);
-          noteControlRenewed(result.controlModeExpiresAt);
           await Promise.all([refreshTree(), refreshInbox()]);
         } catch (caught) {
           noteApiError(caught);
@@ -343,9 +305,29 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       async renameWorkspace(workspaceId: string, title: string) {
         try {
-          const result = await api.renameWorkspace(workspaceId, title);
+          await api.renameWorkspace(workspaceId, title);
           setError(null);
-          noteControlRenewed(result.controlModeExpiresAt);
+          await Promise.all([refreshTree(), refreshInbox()]);
+        } catch (caught) {
+          noteApiError(caught);
+          throw caught;
+        }
+      },
+
+      async closeSurface(surfaceId: string) {
+        try {
+          await api.closeSurface(surfaceId);
+          setError(null);
+          setGrids((current) => {
+            const next = { ...current };
+            delete next[surfaceId];
+            return next;
+          });
+          setContents((current) => {
+            const next = { ...current };
+            delete next[surfaceId];
+            return next;
+          });
           await Promise.all([refreshTree(), refreshInbox()]);
         } catch (caught) {
           noteApiError(caught);
@@ -381,7 +363,6 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       subscribe,
       withError,
       noteApiError,
-      noteControlRenewed,
     ],
   );
 

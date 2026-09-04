@@ -92,7 +92,7 @@ export const ALLOWED_KEYS: readonly CmuxKey[] = CmuxKeySchema.options;
  * 翻页键。
  *
  * 单独一组、不并进 CmuxKeySchema：翻页不改终端里的任何内容，只是让终端
- * （或全屏 TUI 自己）换一屏来画，所以只读模式也放行。全屏 TUI 的历史不在
+ * （或全屏 TUI 自己）换一屏来画。全屏 TUI 的历史不在
  * 终端的 scrollback 里 —— `terminal.replay` 对备用屏永远只给一屏，
  * 想回看更早的输出只有让 TUI 自己翻页这一条路。
  *

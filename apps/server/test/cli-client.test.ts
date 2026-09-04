@@ -4,6 +4,7 @@ import { CmuxError } from "../src/cmux/client.ts";
 import {
   assertPaneTarget,
   assertSurfaceTarget,
+  buildCloseSurfaceArgs,
   buildNewSurfaceArgs,
   buildRenameTabArgs,
   buildRenameWorkspaceArgs,
@@ -280,6 +281,36 @@ describe("新建 surface", () => {
     await expect(client.createSurface({ paneId: "pane:999" })).rejects.toMatchObject({
       code: "PANE_NOT_FOUND",
     });
+  });
+});
+
+describe("关闭 surface", () => {
+  it("必须显式指定 surface，并带上 workspace 上下文", () => {
+    expect(() => buildCloseSurfaceArgs("")).toThrow();
+    expect(buildCloseSurfaceArgs("SF-UUID", "WS-UUID")).toEqual([
+      "close-surface",
+      "--surface",
+      "SF-UUID",
+      "--workspace",
+      "WS-UUID",
+    ]);
+  });
+
+  it("成功后清掉快照缓存", async () => {
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner });
+    await client.closeSurface("SF-UUID", "WS-UUID");
+    expect(calls).toContainEqual(["close-surface", "--surface", "SF-UUID", "--workspace", "WS-UUID"]);
+  });
+
+  it("最后一个 surface 映射成 LAST_SURFACE", async () => {
+    const runner: CommandRunner = async () => ({
+      stdout: "",
+      stderr: "Error: invalid_state: Cannot close the last surface",
+      code: 1,
+    });
+    const client = new CmuxCliClient({ runner });
+    await expect(client.closeSurface("SF-UUID")).rejects.toMatchObject({ code: "LAST_SURFACE" });
   });
 });
 

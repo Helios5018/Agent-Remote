@@ -8,6 +8,7 @@ import {
   type ReadSurfaceOptions,
 } from "./client.ts";
 import {
+  buildCloseSurfaceArgs,
   buildNewSurfaceArgs,
   buildReadScreenArgs,
   buildRenameTabArgs,
@@ -230,6 +231,23 @@ export class CmuxCliClient implements CmuxClient {
       }
       throw new CmuxError(`改 workspace 名称失败: ${workspaceId}`, "CMUX_COMMAND_FAILED", message);
     }
+    this.invalidateTree();
+  }
+
+  async closeSurface(surfaceId: string, workspaceId?: string): Promise<void> {
+    const result = await this.runner(buildCloseSurfaceArgs(surfaceId, workspaceId), { timeoutMs: 8000 });
+    if (result.code !== 0) {
+      const message = result.stderr.trim();
+      if (/last surface/i.test(message)) {
+        throw new CmuxError("这是这个 workspace 里最后一个 surface，cmux 不允许关掉", "LAST_SURFACE", message);
+      }
+      if (/not found|no such|unknown surface/i.test(message)) {
+        throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND", message);
+      }
+      throw new CmuxError(`关闭 surface 失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", message);
+    }
+    this.snapshots.forget(surfaceId);
+    this.grids.forget(surfaceId);
     this.invalidateTree();
   }
 }

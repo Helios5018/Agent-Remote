@@ -50,18 +50,3 @@ export function TopBar({
     </header>
   );
 }
-
-export function ControlToggle() {
-  const { session, setControlMode } = useAppStore();
-  const on = session?.controlMode === true;
-  return (
-    <button
-      type="button"
-      className={`control-toggle ${on ? "on" : "off"}`}
-      onClick={() => void setControlMode(!on)}
-      title={on ? "点击回到只读" : "点击开启控制模式"}
-    >
-      {on ? "CONTROL" : "READ ONLY"}
-    </button>
-  );
-}

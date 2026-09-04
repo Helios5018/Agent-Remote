@@ -5,7 +5,7 @@ import { formatAgo, formatDuration } from "@car/shared";
 import { Composer } from "../components/Composer.tsx";
 import { StatusBadge } from "../components/StatusBadge.tsx";
 import { DEFAULT_GRID_FONT_SIZE, TerminalGrid, type GridLayout } from "../components/TerminalGrid.tsx";
-import { ControlToggle, TopBar } from "../components/TopBar.tsx";
+import { TopBar } from "../components/TopBar.tsx";
 import { findAgent, findSurface, useAppStore } from "../stores/AppStore.tsx";
 import { usePageGesture } from "../hooks/usePageGesture.ts";
 import type { Route } from "../hooks/useRouter.ts";
@@ -20,6 +20,20 @@ const MIN_FONT_SIZE = 7;
 const MAX_FONT_SIZE = 30;
 /** 每点一下按比例缩放，不然从 12.5 调到 30 要点二十次。 */
 const FONT_STEP = 1.2;
+
+/** 翻页后视线落在新一屏的哪一头。 */
+export type ScrollAlign = "top" | "bottom";
+
+/**
+ * 翻完停在哪儿 —— 两个方向是反的，接缝不在同一头。
+ *
+ * `pageup` 换来的是更早的一屏，它的**底部**才接着你刚看到的第一行；
+ * `pagedown` 换来的是更新的一屏，它的**顶部**才接着你刚看到的最后一行。
+ * 一律贴底的话，往下翻会直接落到那一屏的末尾，中间整屏都被跳过。
+ */
+export function alignAfterScroll(action: ScrollAction): ScrollAlign {
+  return action === "pagedown" ? "top" : "bottom";
+}
 
 /** Agent 会话页（需求文档 §7）：使用频率最高的页面。 */
 export function SessionPage({
@@ -44,7 +58,6 @@ export function SessionPage({
     loadHistory,
     refreshGrid,
     refreshTree,
-    session,
     error,
   } = useAppStore();
   const [agent, setAgent] = useState<AgentState | null>(() => findAgent(inbox, surfaceId) ?? null);
@@ -53,6 +66,7 @@ export function SessionPage({
   const [fontSize, setFontSize] = useState(readFontSize);
   const [immersive, setImmersive] = useState(readImmersive);
   const [scrollBusy, setScrollBusy] = useState(false);
+  const [alignNonce, setAlignNonce] = useState(0);
   const [history, setHistory] = useState<{ text: string; truncated: boolean } | null>(null);
   const [historyBusy, setHistoryBusy] = useState(false);
   const outputRef = useRef<HTMLDivElement | null>(null);
@@ -60,13 +74,14 @@ export function SessionPage({
   const stickToBottom = useRef(true);
   // 插入历史后要把视线钉在原来的位置，不然内容整块往下窜
   const keepPositionAfterHistory = useRef(false);
+  // 翻页后视线该落在新一屏的哪一头，见 alignAfterScroll
+  const pendingAlign = useRef<ScrollAlign | null>(null);
   // 翻过页就说明这个 surface 现在不在最新一屏，离开时要退回去
   const scrolledAway = useRef(false);
 
   const liveAgent = findAgent(inbox, surfaceId) ?? agent;
   const placement = findSurface(tree, surfaceId);
   const grid = grids[surfaceId];
-  const controlMode = session?.controlMode === true;
 
   // 自动：全屏 TUI 等比缩放保住边框，普通输出按屏宽软换行
   const layout: GridLayout = layoutPref === "auto" ? (grid?.altScreen ? "fit" : "flow") : layoutPref;
@@ -111,12 +126,25 @@ export function SessionPage({
     return () => window.clearInterval(timer);
   }, []);
 
-  // 只有用户本来就贴着底部时才自动滚动，避免打断向上翻阅
+  /*
+   * 新画面到位后把视线放到该在的地方。
+   *
+   * 翻页的落点优先于「贴底」：这两件事经常冲突 —— 往下翻一屏，接缝在新一屏的
+   * 顶部，可贴底会立刻把它拽到末尾。
+   */
   useLayoutEffect(() => {
     const element = outputRef.current;
-    if (!element || !stickToBottom.current) return;
+    if (!element) return;
+    const align = pendingAlign.current;
+    if (align) {
+      pendingAlign.current = null;
+      element.scrollTop = align === "top" ? 0 : element.scrollHeight;
+      return;
+    }
+    // 只有用户本来就贴着底部时才自动滚动，避免打断向上翻阅
+    if (!stickToBottom.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [grid?.revision, layout, fontSize]);
+  }, [grid?.revision, layout, fontSize, alignNonce]);
 
   // 历史插在网格上方，会把网格整块顶下去；补上同样的高度，视线才不会跳
   useLayoutEffect(() => {
@@ -145,10 +173,18 @@ export function SessionPage({
       // 翻页之后网格换了一屏，之前按旧网格裁出来的历史对不上了
       setHistory(null);
       scrolledAway.current = action !== "bottom";
-      stickToBottom.current = true;
+      pendingAlign.current = alignAfterScroll(action);
+      /*
+       * 只有回到最新一屏才继续跟着新输出跑。停在历史屏上还贴底的话，
+       * Agent 每吐一次新内容都会把画面拽走，想多看两眼都待不住。
+       */
+      stickToBottom.current = action === "bottom";
       await scrollSurface(surfaceId, action);
     } finally {
       setScrollBusy(false);
+      // 画面内容可能和翻页前一模一样（revision 不变），那样上面的 effect 不会重跑，
+      // 落点就会一直挂着不生效 —— 用这个计数逼它走一次。
+      setAlignNonce((current) => current + 1);
     }
   };
 
@@ -205,19 +241,14 @@ export function SessionPage({
         title={title}
         subtitle={surfaceRef}
         onBack={back}
-        onRename={
-          controlMode
-            ? (name) => {
-                const next = name.trim();
-                if (!next || next === title) return;
-                void renameSurface(surfaceId, next);
-              }
-            : undefined
-        }
+        onRename={(name) => {
+          const next = name.trim();
+          if (!next || next === title) return;
+          void renameSurface(surfaceId, next);
+        }}
         renameMaxLength={80}
         renamePlaceholder={title}
         renameAriaLabel="Surface 名称"
-        right={<ControlToggle />}
       />
 
       <div className="session-header">
@@ -396,7 +427,6 @@ export function SessionPage({
         顺带跳过 refreshGrid —— 刷新成功会把刚设上的错误又清掉。
       */}
       <Composer
-        disabled={!controlMode}
         collapsible={immersive}
         onSend={async (text, submit) => {
           await sendInput(surfaceId, text, submit);

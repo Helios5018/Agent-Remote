@@ -43,7 +43,6 @@ export async function createHarness(options: { pin?: string; trustProxy?: boolea
     dataDir: "/tmp/car-test",
     dbPath: ":memory:",
     staticDir: "",
-    controlTtlMs: 60_000,
     staleAfterMs: 600_000,
     demo: true,
     maxOutputLines: 400,
@@ -58,7 +57,7 @@ export async function createHarness(options: { pin?: string; trustProxy?: boolea
   const store = await StateStore.open(":memory:");
   const hub = new RealtimeHub({ now });
   const engine = new StateEngine({ now, store, onChange: (state) => hub.broadcastStatus(state) });
-  const sessions = new SessionManager({ token: config.pin, controlTtlMs: config.controlTtlMs, now });
+  const sessions = new SessionManager({ token: config.pin, now });
   const throttle = new LoginThrottle({ now });
 
   const ctx: AppContext = {
@@ -104,15 +103,4 @@ export async function createHarness(options: { pin?: string; trustProxy?: boolea
   };
 
   return harness;
-}
-
-/** 登录并开启控制模式，返回 cookie。 */
-export async function loginWithControl(harness: TestHarness): Promise<string> {
-  const cookie = await harness.loginCookie();
-  await harness.request("/api/auth/control", {
-    method: "POST",
-    cookie,
-    body: JSON.stringify({ enabled: true }),
-  });
-  return cookie;
 }
