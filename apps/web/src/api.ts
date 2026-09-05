@@ -105,6 +105,20 @@ export const api = {
       body: JSON.stringify({ title }),
     }),
 
+  closeWorkspace: (workspaceId: string, surfaceIds: string[]) =>
+    request<SurfaceWriteResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/close`, {
+      method: "POST", body: JSON.stringify({ confirm: true, surfaceIds }),
+    }),
+  closePane: (workspaceId: string, paneId: string, surfaceIds: string[]) =>
+    request<SurfaceWriteResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/panes/${encodeURIComponent(paneId)}/close`, {
+      method: "POST", body: JSON.stringify({ confirm: true, surfaceIds }),
+    }),
+
+  createWorkspace: () => request<{ ok: true; workspaceId: string }>("/api/workspaces", { method: "POST" }),
+
+  createPane: (workspaceId: string) =>
+    request<{ ok: true; workspaceId: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/panes`, { method: "POST" }),
+
   renameWorkspace: (workspaceId: string, title: string) =>
     request<SurfaceWriteResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}/title`, {
       method: "POST",

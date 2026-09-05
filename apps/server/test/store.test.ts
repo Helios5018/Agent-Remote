@@ -103,3 +103,15 @@ describe("StateStore（SQLite）", () => {
     expect(store.loadAll()).toEqual([]);
   });
 });
+
+describe("持久化不可用", () => {
+  it("打不开数据目录时明确失败，不静默退化为无持久化", async () => {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const directory = await mkdtemp(join(tmpdir(), "car-db-test-"));
+    try {
+      await expect(StateStore.open(join(directory, "missing", "state.db"))).rejects.toThrow("SQLite");
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+});

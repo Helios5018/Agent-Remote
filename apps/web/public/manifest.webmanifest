@@ -4,8 +4,8 @@
   "description": "远程查看与控制运行在 cmux 中的 AI Coding Agent",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b0d10",
-  "theme_color": "#0b0d10",
+  "background_color": "#111214",
+  "theme_color": "#111214",
   "orientation": "portrait",
   "icons": [
     {

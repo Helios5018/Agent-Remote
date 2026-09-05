@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { APP_NAME_MAX_LENGTH, DEFAULT_HOME_TITLE } from "../appName.ts";
 import { useAppStore } from "../stores/AppStore.tsx";
-import { EditableName } from "./EditableName.tsx";
+import { RenameMenu } from "./RenameMenu.tsx";
 
 export function TopBar({
   title,
@@ -12,11 +12,17 @@ export function TopBar({
   renamePlaceholder = DEFAULT_HOME_TITLE,
   renameAriaLabel = "应用名称",
   right,
+  onCreate,
+  createLabel,
+  closeActions,
 }: {
+  closeActions?: { workspace: () => void; pane: () => void };
+  onCreate?: () => Promise<unknown>;
+  createLabel?: string;
   title: string;
   subtitle?: string;
   onBack?: () => void;
-  /** 有这个回调时，点标题就能改名。 */
+  /** 有这个回调时，在更多操作菜单中提供改名。 */
   onRename?: (name: string) => void;
   renameMaxLength?: number;
   renamePlaceholder?: string;
@@ -35,18 +41,13 @@ export function TopBar({
         <span className={`conn conn-${connection}`} title={`WebSocket: ${connection}`} />
       )}
       <div className="topbar-title">
-        <EditableName
-          value={title}
-          onRename={onRename}
-          className={onRename ? "topbar-title-main topbar-title-edit" : "topbar-title-main"}
-          inputClassName="topbar-title-input"
-          maxLength={renameMaxLength}
-          placeholder={renamePlaceholder}
-          ariaLabel={renameAriaLabel}
-        />
+        <div className="topbar-title-main">{title}</div>
         {subtitle ? <div className="topbar-title-sub">{subtitle}</div> : null}
       </div>
-      <div className="topbar-right">{right}</div>
+      <div className="topbar-right">{right}
+        {onRename ? <RenameMenu value={title} onRename={onRename} maxLength={renameMaxLength}
+          closeActions={closeActions} onCreate={onCreate} createLabel={createLabel} label={renameAriaLabel} placeholder={renamePlaceholder} /> : null}
+      </div>
     </header>
   );
 }

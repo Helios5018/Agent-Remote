@@ -11,7 +11,7 @@ export interface CmuxClient {
   ping(): Promise<boolean>;
 
   /** 完整拓扑：Workspace → Pane → Surface（含 Agent 进程发现结果）。 */
-  getTree(): Promise<CmuxTree>;
+  getTree(fresh?: boolean): Promise<CmuxTree>;
 
   /** 读取某个 surface 的当前输出（纯文本，便宜，用于后台状态推断）。 */
   readSurface(surfaceId: string, options?: ReadSurfaceOptions): Promise<SurfaceSnapshot>;
@@ -29,6 +29,9 @@ export interface CmuxClient {
    * 没被激活过就没有 tty，`read-screen` / `terminal.replay` 都会直接报错。
    */
   createSurface(options: CreateSurfaceOptions): Promise<CreatedSurface>;
+
+  createWorkspace(windowId?: string): Promise<CreatedSurface>;
+  createPane(workspaceId: string, surfaceId: string): Promise<CreatedSurface>;
 
   /** 向 surface 输入文本（只打字，不回车）。 */
   sendText(surfaceId: string, text: string): Promise<void>;
@@ -60,6 +63,7 @@ export interface CmuxClient {
    * 关掉一个 surface（cmux 里的真实 tab，进程一起没）。
    * workspace 里最后一个 surface 关不掉，cmux 会报 invalid_state。
    */
+  closeWorkspace(workspaceId: string): Promise<void>;
   closeSurface(surfaceId: string, workspaceId?: string): Promise<void>;
 }
 

@@ -20,7 +20,7 @@ export function createAgentRoutes(ctx: AppContext) {
     let snapshot = null;
     try {
       snapshot = await ctx.client.readSurface(surfaceId);
-      ctx.engine.applyOutput(surfaceId, false, snapshot.revision);
+
     } catch {
       // 读不到内容不影响状态展示。
     }

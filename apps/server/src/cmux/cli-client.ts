@@ -8,6 +8,8 @@ import {
   type ReadSurfaceOptions,
 } from "./client.ts";
 import {
+  assertSurfaceTarget,
+  assertWorkspaceTarget,
   buildCloseSurfaceArgs,
   buildNewSurfaceArgs,
   buildReadScreenArgs,
@@ -17,6 +19,7 @@ import {
   buildScrollKeyArgs,
   buildSendKeyArgs,
   buildSendTextArgs,
+  buildTerminalInputArgs,
   TOP_ARGS,
   TREE_ARGS,
 } from "./control.ts";
@@ -57,7 +60,8 @@ export class CmuxCliClient implements CmuxClient {
     return result.code === 0 && /pong/i.test(result.stdout);
   }
 
-  async getTree(): Promise<CmuxTree> {
+  async getTree(fresh = false): Promise<CmuxTree> {
+    if (fresh) this.invalidateTree();
     const cached = this.treeCache.get("tree");
     if (cached) return cached;
 
@@ -185,6 +189,40 @@ export class CmuxCliClient implements CmuxClient {
     };
   }
 
+  async createWorkspace(windowId?: string): Promise<CreatedSurface> {
+    // legacy new-workspace 即使传 --json 也可能只输出 OK workspace:N。
+    return this.createTopology(["rpc", "workspace.create", JSON.stringify({
+      ...(windowId ? { window_id: windowId } : {}), focus: false,
+    })]);
+  }
+
+  async createPane(workspaceId: string, surfaceId: string): Promise<CreatedSurface> {
+    assertWorkspaceTarget(workspaceId);
+    assertSurfaceTarget(surfaceId);
+    return this.createTopology(["--id-format", "both", "new-split", "right",
+      "--workspace", workspaceId, "--surface", surfaceId, "--focus", "false", "--json"]);
+  }
+
+  private async createTopology(args: string[]): Promise<CreatedSurface> {
+    const result = await this.runner(args, { timeoutMs: 10_000 });
+    if (result.code !== 0) {
+      throw new CmuxError("创建失败：" + (result.stderr.trim() || "cmux 命令失败"), "CMUX_COMMAND_FAILED");
+    }
+    this.invalidateTree();
+    const raw = parseJson(result.stdout) as Record<string, unknown> | null;
+    if (typeof raw?.surface_id !== "string" || typeof raw.workspace_id !== "string") {
+      throw new CmuxError("cmux 没有返回新终端或 workspace 的 id，请刷新查看创建结果", "CMUX_COMMAND_FAILED");
+    }
+    // 只唤醒本次新建的 terminal，不向分屏来源发送输入。
+    try { await this.sendKey(raw.surface_id, "enter"); } catch { /* 已创建，不能诱导重复创建。 */ }
+    return {
+      surfaceId: raw.surface_id,
+      surfaceRef: typeof raw.surface_ref === "string" ? raw.surface_ref : raw.surface_id,
+      workspaceId: raw.workspace_id,
+      paneId: typeof raw.pane_id === "string" ? raw.pane_id : undefined,
+    };
+  }
+
   async sendText(surfaceId: string, text: string): Promise<void> {
     const result = await this.runner(buildSendTextArgs(surfaceId, text), { timeoutMs: 8000 });
     if (result.code !== 0) {
@@ -193,7 +231,10 @@ export class CmuxCliClient implements CmuxClient {
   }
 
   async sendKey(surfaceId: string, key: CmuxKey): Promise<void> {
-    const result = await this.runner(buildSendKeyArgs(surfaceId, key), { timeoutMs: 8000 });
+    // Pi 会启用终端键盘协议；cmux 的高级 send-key 路径对 Ctrl+P 返回成功但不会触发动作。
+    // 直接写入对应控制字节可可靠触发 app.model.cycleForward。
+    const args = key === "ctrl+p" ? buildTerminalInputArgs(surfaceId, "\x10") : buildSendKeyArgs(surfaceId, key);
+    const result = await this.runner(args, { timeoutMs: 8000 });
     if (result.code !== 0) {
       throw new CmuxError(`发送按键失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", result.stderr.trim());
     }
@@ -211,10 +252,18 @@ export class CmuxCliClient implements CmuxClient {
   }
 
   async renameSurface(surfaceId: string, title: string): Promise<void> {
-    const result = await this.runner(buildRenameTabArgs(surfaceId, title), { timeoutMs: 8000 });
+    // rename-tab 的 UUID 也在 workspace 内解析，不能沿用服务进程的当前工作区。
+    assertSurfaceTarget(surfaceId);
+    this.invalidateTree();
+    const tree = await this.getTree();
+    const workspace = tree.workspaces.find((item) =>
+      item.panes.some((pane) => pane.surfaces.some((surface) => surface.id === surfaceId || surface.ref === surfaceId)),
+    );
+    if (!workspace) throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND");
+    const result = await this.runner(buildRenameTabArgs(surfaceId, title, workspace.id), { timeoutMs: 8000 });
     if (result.code !== 0) {
       const message = result.stderr.trim();
-      if (/not found|no such|unknown surface|unknown tab/i.test(message)) {
+      if (/not[_ ]found|no such|unknown surface|unknown tab/i.test(message)) {
         throw new CmuxError(`surface 不存在: ${surfaceId}`, "SURFACE_NOT_FOUND", message);
       }
       throw new CmuxError(`改 surface 名称失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", message);
@@ -232,6 +281,20 @@ export class CmuxCliClient implements CmuxClient {
       throw new CmuxError(`改 workspace 名称失败: ${workspaceId}`, "CMUX_COMMAND_FAILED", message);
     }
     this.invalidateTree();
+  }
+
+  async closeWorkspace(workspaceId: string): Promise<void> {
+    assertWorkspaceTarget(workspaceId);
+    const tree = await this.getTree();
+    const result = await this.runner(["close-workspace", "--workspace", workspaceId], { timeoutMs: 10_000 });
+    this.invalidateTree();
+    if (result.code !== 0) throw new CmuxError("关闭 workspace 失败：" + result.stderr.trim(), "CMUX_COMMAND_FAILED");
+    for (const pane of tree.workspaces.find(w => w.id === workspaceId)?.panes ?? []) {
+      for (const surface of pane.surfaces) {
+        this.snapshots.forget(surface.id);
+        this.grids.forget(surface.id);
+      }
+    }
   }
 
   async closeSurface(surfaceId: string, workspaceId?: string): Promise<void> {

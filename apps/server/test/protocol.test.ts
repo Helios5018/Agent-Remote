@@ -82,11 +82,12 @@ describe("按键白名单（§22 / §23.4）", () => {
       "left",
       "right",
       "ctrl+c",
+      "ctrl+p",
     ]);
   });
 
-  it("Ctrl 组合键只有 Ctrl+C，Ctrl+D 会关掉 surface 所以不提供", () => {
-    expect(ALLOWED_KEYS.filter((key) => key.startsWith("ctrl+"))).toEqual(["ctrl+c"]);
+  it("Ctrl 组合键支持中断和 Pi 模型切换，但不提供会关闭 surface 的 Ctrl+D", () => {
+    expect(ALLOWED_KEYS.filter((key) => key.startsWith("ctrl+"))).toEqual(["ctrl+c", "ctrl+p"]);
     expect(SurfaceKeyRequestSchema.safeParse({ key: "ctrl+d" }).success).toBe(false);
     expect(normalizeKey("Ctrl-D")).toBeNull();
   });
@@ -97,11 +98,14 @@ describe("按键白名单（§22 / §23.4）", () => {
     expect(normalizeKey("ArrowLeft")).toBe("left");
     expect(normalizeKey("ArrowRight")).toBe("right");
     expect(normalizeKey(" Ctrl-C ")).toBe("ctrl+c");
+    expect(normalizeKey("Ctrl-P")).toBe("ctrl+p");
+    expect(normalizeKey("ctrlp")).toBe("ctrl+p");
     expect(normalizeKey("F5")).toBeNull();
   });
 
   it("只有 Ctrl+C 需要二次确认", () => {
     expect(isDangerousKey("ctrl+c")).toBe(true);
+    expect(isDangerousKey("ctrl+p")).toBe(false);
     expect(isDangerousKey("left")).toBe(false);
     expect(isDangerousKey("enter")).toBe(false);
   });

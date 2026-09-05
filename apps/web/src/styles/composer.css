@@ -1,0 +1,267 @@
+/* ---------- 输入区 ---------- */
+
+.composer {
+  --composer-sheet-max: 70vh;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  padding: 10px 12px calc(10px + var(--safe-bottom));
+}
+
+/* 展开编辑：占掉下半屏，终端还留一截能瞄 */
+.composer.composer-editor-open {
+  height: var(--composer-sheet-max);
+  max-height: var(--composer-sheet-max);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.composer-editor-open .composer-hint,
+.composer-editor-open .key-bar-wrap {
+  flex: none;
+}
+
+.composer-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+/* 沉浸模式下输入区先收成一条，点开才展开 */
+.composer-collapsed {
+  padding: 6px 12px calc(6px + var(--safe-bottom));
+}
+
+.composer-expand {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0d1014;
+  color: var(--text-dim);
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.composer-collapse {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.danger-hint {
+  color: var(--error);
+}
+
+.composer-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.composer-editor-open .composer-input-row {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.composer-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.composer-editor-open .composer-input-wrap {
+  height: 100%;
+}
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  resize: none;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0d1014;
+  color: var(--text);
+  padding: 10px 34px 10px 12px;
+  font: inherit;
+  /* 16px 以上，iOS 才不会自动放大页面 */
+  font-size: 16px;
+  line-height: 1.45;
+  min-height: calc(2 * 1.45em + 20px);
+  overflow-y: hidden;
+}
+
+.composer-editor-open .composer-input {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.composer-input:disabled {
+  opacity: 0.5;
+}
+
+.composer-input-tools {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.composer-size-toggle {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.composer-size-toggle:hover,
+.composer-size-toggle:focus-visible,
+.composer-collapse:hover,
+.composer-collapse:focus-visible {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.composer-size-toggle:focus-visible,
+.composer-collapse:focus-visible {
+  outline: 1px solid var(--highlight);
+}
+
+.composer-actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.send-button {
+  flex: none;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 18px;
+  background: var(--accent);
+  color: #08130c;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.send-button:disabled {
+  opacity: 0.4;
+}
+
+/* 按键条：单行横滑，两端渐隐提示还有更多键 */
+.key-bar-wrap {
+  position: relative;
+  margin-top: 8px;
+}
+
+.key-bar-wrap::before,
+.key-bar-wrap::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 1;
+}
+
+.key-bar-wrap::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-elevated), rgba(20, 24, 29, 0));
+}
+
+.key-bar-wrap::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-elevated), rgba(20, 24, 29, 0));
+}
+
+.key-bar-wrap.fade-start::before,
+.key-bar-wrap.fade-end::after {
+  opacity: 1;
+}
+
+.key-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.key-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* 同一组键贴在一起，组间留白代替分隔线 */
+.key-group {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.key-group + .key-group {
+  margin-left: 10px;
+}
+
+.key-button {
+  flex: none;
+  border: 1px solid var(--border);
+  background: #0d1014;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 9px;
+  font-size: 13px;
+  /* 44px 是能稳定点中的最小尺寸，再小就别压了，让它横滑 */
+  min-width: 44px;
+  cursor: pointer;
+}
+
+.key-button.danger {
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+
+
+.key-button.danger-armed {
+  background: var(--error);
+  color: #200;
+  font-weight: 700;
+}
+
+.key-button:disabled {
+  opacity: 0.4;
+}

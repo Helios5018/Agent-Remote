@@ -1,12 +1,15 @@
+import { alignAfterScroll, type ScrollAlign } from "../features/session/scroll.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AgentState, ScrollAction } from "@car/protocol";
 import { AGENT_DISPLAY_NAME, gridMissingHistoryRows, gridRowCount, STATUS_LABEL } from "@car/protocol";
 import { formatAgo, formatDuration } from "@car/shared";
 import { Composer } from "../components/Composer.tsx";
+import { SessionToolIcon } from "../components/SessionToolIcon.tsx";
 import { StatusBadge } from "../components/StatusBadge.tsx";
 import { DEFAULT_GRID_FONT_SIZE, TerminalGrid, type GridLayout } from "../components/TerminalGrid.tsx";
 import { TopBar } from "../components/TopBar.tsx";
-import { findAgent, findSurface, useAppStore } from "../stores/AppStore.tsx";
+import { useAppStore, useSurfaceGrid } from "../stores/AppStore.tsx";
+import { findAgent, findSurface } from "../stores/selectors.ts";
 import { usePageGesture } from "../hooks/usePageGesture.ts";
 import type { Route } from "../hooks/useRouter.ts";
 
@@ -21,20 +24,6 @@ const MAX_FONT_SIZE = 30;
 /** 每点一下按比例缩放，不然从 12.5 调到 30 要点二十次。 */
 const FONT_STEP = 1.2;
 
-/** 翻页后视线落在新一屏的哪一头。 */
-export type ScrollAlign = "top" | "bottom";
-
-/**
- * 翻完停在哪儿 —— 两个方向是反的，接缝不在同一头。
- *
- * `pageup` 换来的是更早的一屏，它的**底部**才接着你刚看到的第一行；
- * `pagedown` 换来的是更新的一屏，它的**顶部**才接着你刚看到的最后一行。
- * 一律贴底的话，往下翻会直接落到那一屏的末尾，中间整屏都被跳过。
- */
-export function alignAfterScroll(action: ScrollAction): ScrollAlign {
-  return action === "pagedown" ? "top" : "bottom";
-}
-
 /** Agent 会话页（需求文档 §7）：使用频率最高的页面。 */
 export function SessionPage({
   surfaceId,
@@ -48,7 +37,6 @@ export function SessionPage({
   const {
     inbox,
     tree,
-    grids,
     openSession,
     subscribe,
     sendInput,
@@ -81,7 +69,7 @@ export function SessionPage({
 
   const liveAgent = findAgent(inbox, surfaceId) ?? agent;
   const placement = findSurface(tree, surfaceId);
-  const grid = grids[surfaceId];
+  const grid = useSurfaceGrid(surfaceId);
 
   // 自动：全屏 TUI 等比缩放保住边框，普通输出按屏宽软换行
   const layout: GridLayout = layoutPref === "auto" ? (grid?.altScreen ? "fit" : "flow") : layoutPref;
@@ -107,7 +95,7 @@ export function SessionPage({
       actionsRef.current.subscribe(null);
       // 翻页动的是 Mac 上那块真实画面，离开前退回最新一屏，
       // 否则本人坐到电脑前会发现终端莫名其妙停在半路。
-      if (scrolledAway.current) void actionsRef.current.scrollSurface(surfaceId, "bottom");
+      if (scrolledAway.current) void actionsRef.current.scrollSurface(surfaceId, "bottom").catch(() => undefined);
     };
   }, [surfaceId]);
 
@@ -180,6 +168,9 @@ export function SessionPage({
        */
       stickToBottom.current = action === "bottom";
       await scrollSurface(surfaceId, action);
+    } catch {
+      // 错误已由 Store 展示；失败时不按成功画面调整视线。
+      pendingAlign.current = null;
     } finally {
       setScrollBusy(false);
       // 画面内容可能和翻页前一模一样（revision 不变），那样上面的 effect 不会重跑，
@@ -218,10 +209,9 @@ export function SessionPage({
   };
 
   // 主标题用 surface 名，workspace 名放到副标题里做归属说明。
-  const title = liveAgent?.surfaceTitle || placement?.surface.title || liveAgent?.surfaceRef || surfaceId;
+  const title = liveAgent?.surfaceTitle || placement?.surface.title || "会话";
   const workspaceTitle = liveAgent?.workspaceTitle ?? placement?.workspace.title;
   const workspaceId = liveAgent?.workspaceId ?? placement?.workspace.id;
-  const surfaceRef = liveAgent?.surfaceRef ?? placement?.surface.ref ?? surfaceId;
   const kindLabel = liveAgent
     ? AGENT_DISPLAY_NAME[liveAgent.agent]
     : placement?.surface.type === "terminal" || !placement
@@ -239,7 +229,6 @@ export function SessionPage({
     <div className={`page session-page${immersive ? " immersive" : ""}`}>
       <TopBar
         title={title}
-        subtitle={surfaceRef}
         onBack={back}
         onRename={(name) => {
           const next = name.trim();
@@ -322,7 +311,7 @@ export function SessionPage({
         </div>
       </div>
 
-      <div className="session-tools">
+      <div className="session-tools" role="group" aria-label="终端工具">
         {/*
           翻页只给全屏 TUI 用：它的历史在程序自己手里，终端这层一行 scrollback 都没有。
           普通屏有真正的回滚，往上翻看「加载更早的历史」就够了，
@@ -332,93 +321,94 @@ export function SessionPage({
           <div className="session-scroll-group">
             <button
               type="button"
-              className="chip-button"
+              className="chip-button session-tool-button"
+              aria-label="上一屏"
               title="上一屏（也可以直接往下滑）。让终端里的程序自己往回翻，Mac 上那块画面会跟着动，离开会话时自动回到最新"
               disabled={scrollBusy}
               onClick={() => void scrollPage("pageup")}
             >
-              ▲ 上一屏
+              <SessionToolIcon name="page-up" />
             </button>
             <button
               type="button"
-              className="chip-button"
+              className="chip-button session-tool-button"
+              aria-label="下一屏"
               title="下一屏（也可以直接往上滑）"
               disabled={scrollBusy}
               onClick={() => void scrollPage("pagedown")}
             >
-              ▼ 下一屏
+              <SessionToolIcon name="page-down" />
             </button>
             <button
               type="button"
-              className="chip-button"
+              className="chip-button session-tool-button"
+              aria-label="回到最新"
               title="回到最新一屏"
               disabled={scrollBusy}
               onClick={() => void scrollPage("bottom")}
             >
-              ⤓ 最新
+              <SessionToolIcon name="bottom" />
             </button>
           </div>
-        ) : (
-          <span className="dim">{missingHistory > 0 ? "更早的内容在画面上方" : ""}</span>
-        )}
+        ) : null}
 
         <div className="session-tools-right">
-          {grid ? (
-            <span className="dim mono">
-              {grid.columns}×{grid.viewportRows}
-              {grid.altScreen ? " · TUI" : ""}
-              {grid.scrolledRows > 0 ? ` · ↑${grid.scrolledRows}` : ""}
-            </span>
-          ) : null}
           <div className="session-font-group">
             <button
               type="button"
-              className="chip-button"
+              className="chip-button session-tool-button"
+              aria-label="缩小终端"
               title="缩小（TUI 下是整屏缩放，一屏能塞下更多行）"
               disabled={fontSize <= MIN_FONT_SIZE}
               onClick={() => zoomFont(1 / FONT_STEP)}
             >
-              A−
+              <SessionToolIcon name="zoom-out" />
             </button>
             <button
               type="button"
-              className="chip-button"
+              className="chip-button session-tool-button"
+              aria-label="放大终端"
               title="放大（TUI 下超过屏宽就横向滑动看）"
               disabled={fontSize >= MAX_FONT_SIZE}
               onClick={() => zoomFont(FONT_STEP)}
             >
-              A+
+              <SessionToolIcon name="zoom-in" />
             </button>
           </div>
-          <button
-            type="button"
-            className="chip-button"
-            title={
-              layoutPref === "auto"
-                ? "当前：自动（TUI 缩放 / 普通输出换行）"
-                : layoutPref === "fit"
-                  ? "当前：整屏缩放到屏宽"
-                  : "当前：按屏宽换行"
-            }
-            onClick={() =>
-              setLayoutPref((current) =>
-                current === "auto" ? "fit" : current === "fit" ? "flow" : "auto",
-              )
-            }
-          >
-            {layoutPref === "auto" ? "自动" : layoutPref === "fit" ? "缩放" : "换行"}
-          </button>
-          <button
-            type="button"
-            className="chip-button"
-            title={immersive ? "退出沉浸模式" : "沉浸模式：收起标题和状态栏，把屏幕都留给终端"}
-            onClick={() => setImmersive((current) => !current)}
-          >
-            {immersive ? "⤡ 退出" : "⤢ 沉浸"}
-          </button>
-          <button type="button" className="chip-button" onClick={() => void refreshGrid(surfaceId)}>
-            刷新
-          </button>
+          <div className="session-view-group">
+            <button
+              type="button"
+              className="chip-button session-tool-button"
+              aria-label={`显示方式：${layoutPref === "auto" ? "自动" : layoutPref === "fit" ? "缩放" : "换行"}`}
+              title={
+                layoutPref === "auto"
+                  ? "当前：自动（TUI 缩放 / 普通输出换行）"
+                  : layoutPref === "fit"
+                    ? "当前：整屏缩放到屏宽"
+                    : "当前：按屏宽换行"
+              }
+              onClick={() =>
+                setLayoutPref((current) =>
+                  current === "auto" ? "fit" : current === "fit" ? "flow" : "auto",
+                )
+              }
+            >
+              <SessionToolIcon name={layoutPref} />
+            </button>
+            <button
+              type="button"
+              className="chip-button session-tool-button"
+              aria-label={immersive ? "退出沉浸模式" : "进入沉浸模式"}
+              aria-pressed={immersive}
+              title={immersive ? "退出沉浸模式" : "沉浸模式：收起标题和状态栏，把屏幕都留给终端"}
+              onClick={() => setImmersive((current) => !current)}
+            >
+              <SessionToolIcon name={immersive ? "collapse" : "expand"} />
+            </button>
+            <button type="button" className="chip-button session-tool-button" aria-label="刷新终端" title="刷新终端" onClick={() => void refreshGrid(surfaceId)}>
+              <SessionToolIcon name="refresh" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -428,6 +418,7 @@ export function SessionPage({
       */}
       <Composer
         collapsible={immersive}
+        agentKind={liveAgent?.agent ?? placement?.surface.agent}
         onSend={async (text, submit) => {
           await sendInput(surfaceId, text, submit);
           await refreshGrid(surfaceId);

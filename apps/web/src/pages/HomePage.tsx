@@ -1,26 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import type {
-  AgentKind,
-  AgentState,
-  AttentionGroup,
-  CmuxPane,
-  CmuxSurface,
-  CmuxWorkspace,
-} from "@car/protocol";
-import {
-  AGENT_DISPLAY_NAME,
-  AGENT_KINDS,
-  STATUS_GLYPH,
-  STATUS_LABEL,
-  attentionGroupOf,
-} from "@car/protocol";
-import { formatAgo, formatDuration } from "@car/shared";
+import type { AttentionGroup, CmuxSurface } from "@car/protocol";
+import { attentionGroupOf } from "@car/protocol";
 import { APP_NAME_MAX_LENGTH, DEFAULT_HOME_TITLE } from "../appName.ts";
-import { EditableName } from "../components/EditableName.tsx";
 import { TopBar } from "../components/TopBar.tsx";
 import { useAppName } from "../hooks/useAppName.tsx";
-import { agentsBySurface, useAppStore } from "../stores/AppStore.tsx";
+import { useAppStore } from "../stores/AppStore.tsx";
+import { agentsBySurface } from "../stores/selectors.ts";
 import type { Route } from "../hooks/useRouter.ts";
+import { WorkspaceCloseDialog, type WorkspaceCloseTarget } from "../features/workspace/WorkspaceCloseDialog.tsx";
+import { TreeView } from "../features/workspace/TreeView.tsx";
+import type { VisibleWorkspace, VisiblePane } from "../features/workspace/model.ts";
 
 /**
  * 首页（需求文档 §5 / §6）。
@@ -56,20 +45,6 @@ function loadPrefs(): Prefs {
   }
 }
 
-interface VisiblePane {
-  pane: CmuxPane;
-  key: string;
-  surfaces: CmuxSurface[];
-}
-
-interface VisibleWorkspace {
-  workspace: CmuxWorkspace;
-  panes: VisiblePane[];
-  counts: Record<AttentionGroup, number>;
-  /** 被「只看 Agent」藏起来的 surface 数量。 */
-  hidden: number;
-}
-
 export function HomePage({
   navigate,
   back,
@@ -80,10 +55,11 @@ export function HomePage({
   /** 只看某一个 workspace（来自 #/w/:id 深链）。 */
   workspaceId?: string;
 }) {
-  const { inbox, tree, error, refreshInbox, refreshTree, subscribe, connection, renameWorkspace } =
+  const { inbox, tree, error, refreshInbox, refreshTree, subscribe, connection, renameWorkspace, createWorkspace, createPane } =
     useAppStore();
   const { homeTitle, setAppName } = useAppName();
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
+  const [closeTarget, setCloseTarget] = useState<WorkspaceCloseTarget | null>(null);
   const [query, setQuery] = useState("");
   const [now, setNow] = useState(() => Date.now());
 
@@ -188,14 +164,28 @@ export function HomePage({
         .join(" · ")
     : "加载中…";
 
-  const focusedWorkspace = workspaceId ? model[0]?.workspace : undefined;
+  const focusedWorkspace = workspaceId ? tree?.workspaces.find(w => w.id === workspaceId || w.ref === workspaceId) : undefined;
+  const revealCreated = async (create: () => Promise<string>) => {
+    const id = await create();
+    setQuery("");
+    setPrefs(current => ({ ...current, agentsOnly: false,
+      collapsed: current.collapsed.filter(key => key !== id) }));
+  };
   const title = focusedWorkspace ? focusedWorkspace.title : homeTitle;
   // 搜索时强制展开，否则搜到的东西还藏在折叠里就没意义了。
   const forceExpand = keyword.length > 0;
 
   return (
     <div className="page">
+      {closeTarget ? <WorkspaceCloseDialog target={closeTarget} onDismiss={() => setCloseTarget(null)}
+        onWorkspaceClosed={id => { if (workspaceId === id) navigate({ name: "inbox" }); }} /> : null}
       <TopBar
+        closeActions={focusedWorkspace ? {
+          workspace: () => setCloseTarget({ workspace: focusedWorkspace, mode: "workspace" }),
+          pane: () => setCloseTarget({ workspace: focusedWorkspace, mode: "pane" }),
+        } : undefined}
+        onCreate={() => revealCreated(focusedWorkspace ? () => createPane(focusedWorkspace.id) : createWorkspace)}
+        createLabel={focusedWorkspace ? "增加 pane" : "增加 workspace"}
         title={title}
         subtitle={summaryText}
         onBack={back}
@@ -266,6 +256,8 @@ export function HomePage({
           loading={!tree}
           keyword={keyword}
           onToggle={toggle}
+          onClose={(workspace, mode) => setCloseTarget({ workspace, mode })}
+          onCreatePane={(id) => revealCreated(() => createPane(id))}
           onRenameWorkspace={(id, name) => {
             const next = name.trim();
             if (!next) return;
@@ -282,289 +274,6 @@ export function HomePage({
           </div>
         ) : null}
       </div>
-    </div>
-  );
-}
-
-function TreeView({
-  model,
-  agents,
-  now,
-  collapsed,
-  forceExpand,
-  loading,
-  keyword,
-  onToggle,
-  onRenameWorkspace,
-  navigate,
-}: {
-  model: VisibleWorkspace[];
-  agents: Map<string, AgentState>;
-  now: number;
-  collapsed: Set<string>;
-  forceExpand: boolean;
-  loading: boolean;
-  keyword: string;
-  onToggle: (key: string) => void;
-  onRenameWorkspace?: (workspaceId: string, name: string) => void;
-  navigate: (route: Route) => void;
-}) {
-  if (loading) return <div className="empty">加载 cmux 结构中…</div>;
-
-  if (model.length === 0) {
-    return (
-      <div className="empty">
-        <p>{keyword ? "没有匹配的 workspace / surface。" : "没有可显示的 surface。"}</p>
-        <p className="empty-hint">
-          {keyword ? "换个关键词试试。" : "如果只是没在跑 Agent，可以点上面的「只看 Agent」切换成全部 surface。"}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {model.map(({ workspace, panes, counts, hidden }) => {
-        const expanded = forceExpand || !collapsed.has(workspace.id);
-        const total = panes.reduce((sum, pane) => sum + pane.surfaces.length, 0);
-        const workspaceSurfaceCount = workspace.panes.reduce((sum, pane) => sum + pane.surfaces.length, 0);
-        // 只有一个 pane 时不必再套一层，少一级缩进。
-        const flat = panes.length === 1;
-
-        return (
-          <section className="ws-block" key={workspace.id}>
-            <div className="ws-header" onClick={() => onToggle(workspace.id)}>
-              <span className="caret">{expanded ? "▾" : "▸"}</span>
-              <EditableName
-                value={workspace.title}
-                onRename={onRenameWorkspace ? (name) => onRenameWorkspace(workspace.id, name) : undefined}
-                className={onRenameWorkspace ? "ws-name ws-name-edit" : "ws-name"}
-                inputClassName="ws-name-input"
-                maxLength={80}
-                placeholder={workspace.title}
-                ariaLabel="Workspace 名称"
-              />
-              {workspace.selected ? <span className="chip chip-now">当前</span> : null}
-              <span className="ws-counts">
-                {counts.NEEDS_YOU > 0 ? (
-                  <span className="chip chip-attention">{counts.NEEDS_YOU} 需要你</span>
-                ) : null}
-                {counts.WORKING > 0 ? <span className="chip chip-working">{counts.WORKING} 运行中</span> : null}
-                {!expanded ? <span className="chip">{total} surface</span> : null}
-                {/* 被「只看 Agent」藏起来的数量，提示这里还有东西没显示 */}
-                {hidden > 0 ? (
-                  <span className="chip chip-hidden" title={`还有 ${hidden} 个没有 Agent 的 surface`}>
-                    +{hidden}
-                  </span>
-                ) : null}
-              </span>
-              <span className="mono dim ws-ref">{workspace.ref}</span>
-            </div>
-
-            {expanded
-              ? panes.map(({ pane, key, surfaces }) => {
-                  const paneExpanded = flat || forceExpand || !collapsed.has(key);
-                  return (
-                    <div className="pane-block" key={key}>
-                      {flat ? null : (
-                        <button type="button" className="pane-header" onClick={() => onToggle(key)}>
-                          <span className="caret">{paneExpanded ? "▾" : "▸"}</span>
-                          <span className="mono">{pane.ref}</span>
-                          <span className="dim">· {surfaces.length} surface</span>
-                          {pane.focused ? <span className="chip chip-now">焦点</span> : null}
-                        </button>
-                      )}
-                      {paneExpanded ? (
-                        <>
-                          {surfaces.map((surface) => (
-                            <SurfaceRow
-                              key={surface.id}
-                              surface={surface}
-                              agent={agents.get(surface.id)}
-                              now={now}
-                              lastInWorkspace={workspaceSurfaceCount <= 1}
-                              onOpen={() => navigate({ name: "session", surfaceId: surface.id })}
-                            />
-                          ))}
-                          <NewSurfaceRow workspaceId={workspace.id} pane={pane} navigate={navigate} />
-                        </>
-                      ) : null}
-                    </div>
-                  );
-                })
-              : null}
-
-          </section>
-        );
-      })}
-    </>
-  );
-}
-
-/**
- * 在这个 pane 里新开一个 tab。
- *
- * 只建 terminal：cmux 自己的 agent-session 面板读不到画面，从手机上打开会是一片空白。
- * 起 Agent 走服务端白名单（Claude / Codex / Grok / Pi），这边只能选，不能传命令。
- * 工作目录由服务端从同 pane 已有进程反查，所以手机上不用打路径。
- */
-function NewSurfaceRow({
-  workspaceId,
-  pane,
-  navigate,
-}: {
-  workspaceId: string;
-  pane: CmuxPane;
-  navigate: (route: Route) => void;
-}) {
-  const { createSurface } = useAppStore();
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  // 失败原因就地显示。顶部的 banner 在长列表里可能已经滚出屏幕，看不见等于没提示。
-  const [note, setNote] = useState<string | null>(null);
-
-  const create = async (launch: AgentKind | null) => {
-    if (busy) return;
-    setBusy(true);
-    setNote(null);
-    try {
-      const result = await createSurface(pane.id ?? pane.ref, workspaceId, launch);
-      setOpen(false);
-      // 建完直接进会话页：新 tab 在 Mac 上没有被 focus，只能从这里看。
-      navigate({ name: "session", surfaceId: result.surfaceId });
-    } catch (caught) {
-      setNote(`没建成：${caught instanceof Error ? caught.message : String(caught)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <div className="pane-new">
-        <button type="button" className="pane-new-trigger" onClick={() => setOpen(true)}>
-          ＋ 新建 surface
-        </button>
-        {note ? <div className="pane-new-note">{note}</div> : null}
-      </div>
-    );
-  }
-
-  return (
-    <div className="pane-new open">
-      <button type="button" className="pane-new-option" disabled={busy} onClick={() => void create(null)}>
-        Shell
-      </button>
-      {AGENT_KINDS.map((kind) => (
-        <button
-          key={kind}
-          type="button"
-          className="pane-new-option"
-          disabled={busy}
-          onClick={() => void create(kind)}
-        >
-          {AGENT_DISPLAY_NAME[kind]}
-        </button>
-      ))}
-      <button type="button" className="pane-new-cancel" disabled={busy} onClick={() => setOpen(false)}>
-        {busy ? "创建中…" : "取消"}
-      </button>
-      {note ? <div className="pane-new-note">{note}</div> : null}
-    </div>
-  );
-}
-
-const STATUS_TONE: Record<string, string> = {
-  WORKING: "status-working",
-  NEEDS_APPROVAL: "status-attention",
-  NEEDS_INPUT: "status-attention",
-  RESPONDED_UNREAD: "status-responded",
-  IDLE: "status-idle",
-  POSSIBLY_STALE: "status-stale",
-  ERROR: "status-error",
-  CLOSED: "status-closed",
-};
-
-function SurfaceRow({
-  surface,
-  agent,
-  now,
-  lastInWorkspace,
-  onOpen,
-}: {
-  surface: CmuxSurface;
-  agent?: AgentState;
-  now: number;
-  lastInWorkspace: boolean;
-  onOpen: () => void;
-}) {
-  const { closeSurface } = useAppStore();
-  const [armed, setArmed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const kind = surface.agent ?? agent?.agent ?? null;
-  const kindLabel = kind ? AGENT_DISPLAY_NAME[kind] : surface.type === "terminal" ? "Shell" : surface.type;
-  const tone = agent ? STATUS_TONE[agent.status] : "status-idle";
-  const glyph = agent ? STATUS_GLYPH[agent.status] : kind ? "○" : "·";
-  const timing = agent
-    ? agent.status === "WORKING" && agent.turnStartedAt
-      ? formatDuration(now - agent.turnStartedAt)
-      : formatAgo(agent.lastActivityAt, now)
-    : "";
-
-  const close = async () => {
-    if (busy || lastInWorkspace) return;
-    if (!armed) {
-      setArmed(true);
-      setNote(null);
-      return;
-    }
-    setBusy(true);
-    setNote(null);
-    try {
-      await closeSurface(surface.id);
-    } catch (caught) {
-      setNote(`没关掉：${caught instanceof Error ? caught.message : String(caught)}`);
-      setArmed(false);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className={`surface-row ${agent ? "" : "muted"}`}>
-      <button type="button" className="surface-open" onClick={onOpen}>
-        <span className={`surface-glyph ${tone}`}>{glyph}</span>
-        <span className="surface-main">
-          <span className="surface-title">{surface.title}</span>
-          <span className="surface-meta">
-            {kindLabel}
-            {agent ? ` · ${STATUS_LABEL[agent.status]}` : ""}
-            {agent?.currentActivity ? ` · ${agent.currentActivity}` : ""}
-          </span>
-        </span>
-        <span className="surface-side">
-          {timing ? <span>{timing}</span> : null}
-          <span className="mono dim">{surface.ref}</span>
-        </span>
-      </button>
-      <button
-        type="button"
-        className={`surface-close${armed ? " armed" : ""}`}
-        disabled={busy || lastInWorkspace}
-        title={
-          lastInWorkspace
-            ? "这是这个 workspace 最后一个 tab，cmux 不允许关掉"
-            : armed
-              ? "再点一次确认关掉（进程会一起没）"
-              : "关闭这个 surface"
-        }
-        aria-label={lastInWorkspace ? "无法关闭最后一个 surface" : armed ? "确认关闭" : "关闭"}
-        onClick={() => void close()}
-      >
-        {armed ? "确认关?" : "×"}
-      </button>
-      {note ? <div className="surface-close-note">{note}</div> : null}
     </div>
   );
 }

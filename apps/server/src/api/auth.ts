@@ -1,3 +1,4 @@
+import { safeJson } from "./http.ts";
 import { Hono, type Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { LoginRequestSchema, type SessionInfo } from "@car/protocol";
@@ -108,10 +109,3 @@ export function createAuthRoutes(ctx: AppContext) {
   return app;
 }
 
-export async function safeJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
-}

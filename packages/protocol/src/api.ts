@@ -153,3 +153,9 @@ export const MarkReadResponseSchema = z.object({
   ok: z.literal(true),
   agent: AgentStateSchema,
 });
+
+/** 批量关闭必须携带用户确认时看到的完整 surface 集合。 */
+export const CloseTopologyRequestSchema = z.object({
+  confirm: z.literal(true),
+  surfaceIds: z.array(z.string().min(1)).min(1),
+});

@@ -3,7 +3,7 @@ import { AgentKindSchema } from "@car/protocol";
 import { type AppContext } from "../context.ts";
 import { HookEnvelopeSchema, normalizeHook } from "../hooks/index.ts";
 import { requireHookToken } from "../security/middleware.ts";
-import { safeJson } from "./auth.ts";
+import { safeJson } from "./http.ts";
 
 /**
  * Hook Receiver（需求文档 §10）。

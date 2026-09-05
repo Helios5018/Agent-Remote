@@ -33,6 +33,8 @@ export type ApiErrorCode =
   | "NOT_FOUND"
   | "CONFIRM_REQUIRED"
   | "LAST_SURFACE"
+  | "LAST_PANE"
+  | "TOPOLOGY_CHANGED"
   | "TOO_MANY_ATTEMPTS"
   | "CMUX_UNAVAILABLE"
   | "INTERNAL";

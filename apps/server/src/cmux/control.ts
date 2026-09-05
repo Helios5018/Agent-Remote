@@ -65,6 +65,17 @@ export function buildSendKeyArgs(surfaceId: string, key: CmuxKey): string[] {
 }
 
 /**
+ * 直接向 PTY 写入输入字节。
+ *
+ * cmux `send-key ctrl+p` 虽然返回成功，但对启用了终端键盘协议的 Pi TUI 实测不会触发
+ * 模型切换；`terminal.input` 写入 Ctrl+P 的控制字节（0x10）则与本地按键行为一致。
+ */
+export function buildTerminalInputArgs(surfaceId: string, text: string): string[] {
+  assertSurfaceTarget(surfaceId);
+  return ["rpc", "terminal.input", JSON.stringify({ terminal_id: surfaceId, text })];
+}
+
+/**
  * 翻页。走的还是 send-key，但语义上只是换一屏来看（见 `SurfaceScrollRequestSchema`）。
  */
 export function buildScrollKeyArgs(surfaceId: string, key: ScrollKey): string[] {
@@ -94,9 +105,10 @@ export function assertWorkspaceTarget(workspaceId: string | undefined | null): a
   }
 }
 
-export function buildRenameTabArgs(surfaceId: string, title: string): string[] {
+export function buildRenameTabArgs(surfaceId: string, title: string, workspaceId: string): string[] {
   assertSurfaceTarget(surfaceId);
-  return ["rename-tab", "--surface", surfaceId, "--title", title];
+  assertWorkspaceTarget(workspaceId);
+  return ["rename-tab", "--workspace", workspaceId, "--surface", surfaceId, "--title", title];
 }
 
 export function buildRenameWorkspaceArgs(workspaceId: string, title: string): string[] {

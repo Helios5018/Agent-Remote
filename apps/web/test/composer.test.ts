@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   applyPaste,
+  composerKeysForAgent,
   countTextLines,
   PASTE_EXPAND_LINES,
   shouldExpandEditorForText,
 } from "../src/components/Composer.tsx";
+
+describe("Agent 快捷键", () => {
+  it("只给 Pi 展示用于切换模型的 Ctrl+P", () => {
+    expect(composerKeysForAgent("pi")).toContain("ctrl+p");
+    expect(composerKeysForAgent("claude")).not.toContain("ctrl+p");
+    expect(composerKeysForAgent(null)).not.toContain("ctrl+p");
+  });
+});
 
 describe("输入框展开判断", () => {
   it("空文本算 1 行", () => {

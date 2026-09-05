@@ -174,6 +174,8 @@ describe("Poller 刷新策略（§18）", () => {
       ...client,
       ping: () => client.ping(),
       getTree: () => client.getTree(),
+      createWorkspace: () => client.createWorkspace(),
+      createPane: (id: string, surfaceId: string) => client.createPane(id, surfaceId),
       createSurface: (options: Parameters<typeof client.createSurface>[0]) => client.createSurface(options),
       sendText: (id: string, text: string) => client.sendText(id, text),
       sendKey: (id: string, key: "enter") => client.sendKey(id, key),
@@ -181,6 +183,7 @@ describe("Poller 刷新策略（§18）", () => {
       readHistory: (id: string, lines: number) => client.readHistory(id, lines),
       renameSurface: (id: string, title: string) => client.renameSurface(id, title),
       renameWorkspace: (id: string, title: string) => client.renameWorkspace(id, title),
+      closeWorkspace: (id: string) => client.closeWorkspace(id),
       closeSurface: (id: string, workspaceId?: string) => client.closeSurface(id, workspaceId),
       readSurface: async () => {
         throw new Error("read-screen timeout");
@@ -195,5 +198,48 @@ describe("Poller 刷新策略（§18）", () => {
     poller.scheduleImmediate("sf-11");
     await expect(poller.tick()).resolves.toBeUndefined();
     expect(onError).toHaveBeenCalled();
+  });
+});
+
+describe("查看会话时的活动推断", () => {
+  async function setup(agent: "codex" | null = "codex") {
+    let time = 100_000;
+    const now = () => time;
+    const client = new FakeCmuxClient([{ id: "w", ref: "workspace:1", title: "测试", panes: [
+      { id: "p", ref: "pane:1", surfaces: [{ id: "s", ref: "surface:1", title: "测试", agent, pid: agent ? 123 : undefined, content: "ready" }] },
+    ] }], now);
+    const engine = new StateEngine({ now });
+    const hub = new RealtimeHub();
+    const poller = new Poller({ client, engine, hub, now });
+    const viewer = hub.add(() => {});
+    hub.handleMessage(viewer.id, JSON.stringify({ type: "subscribe", surfaceId: "s" }));
+    await poller.tick();
+    return { client, engine, hub, poller, viewer, advance: (ms: number) => { time += ms; } };
+  }
+
+  it("普通 shell 被查看时仍按 400ms 读取", async () => {
+    const { client, poller, advance } = await setup(null);
+    const read = vi.spyOn(client, "readGrid");
+    advance(399); await poller.tick(); expect(read).not.toHaveBeenCalled();
+    advance(1); await poller.tick(); expect(read).toHaveBeenCalledOnce();
+  });
+
+  it("无 Hook 会话画面静止后结束 WORKING，查看中直接已读", async () => {
+    const { client, engine, poller, advance } = await setup();
+    engine.setViewing("s", true);
+    client.appendOutput("s", "working");
+    advance(400); await poller.tick();
+    expect(engine.get("s")?.status).toBe("WORKING");
+    advance(15_001); await poller.tick();
+    expect(engine.get("s")?.status).toBe("IDLE");
+  });
+
+  it("从网格切到纯文本不把独立的编号差异当成新活动", async () => {
+    const { engine, hub, viewer, poller, advance } = await setup();
+    const revision = engine.get("s")!.outputRevision;
+    hub.handleMessage(viewer.id, JSON.stringify({ type: "subscribe", surfaceId: null }));
+    advance(8000); await poller.tick();
+    expect(engine.get("s")?.status).toBe("IDLE");
+    expect(engine.get("s")?.outputRevision).toBe(revision);
   });
 });

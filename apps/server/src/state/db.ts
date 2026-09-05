@@ -2,8 +2,8 @@
  * 极薄的 SQLite 驱动抽象。
  *
  * 服务运行在 Bun 上（bun:sqlite），测试跑在 Node 上（node:sqlite），
- * 两边 API 略有差别，这里统一成一个接口；都不可用时退化为内存实现，
- * 保证 Hook / 状态功能在任何环境下都不会因为存储而崩掉。
+ * 两边 API 略有差别，这里统一成一个接口。打开失败显式报错，
+ * 测试需通过 createMemoryDatabase 显式选择无持久化模式。
  */
 export interface SqlDatabase {
   exec(sql: string): void;
@@ -24,8 +24,8 @@ export async function openDatabase(path: string): Promise<SqlDatabase> {
       };
       const db = new Database(path, { create: true });
       return wrapBun(db);
-    } catch {
-      // 落到下面的 node:sqlite / memory
+    } catch (cause) {
+      throw new Error("无法打开 SQLite 数据库，请检查数据目录与文件权限", { cause });
     }
   }
 
@@ -38,8 +38,8 @@ export async function openDatabase(path: string): Promise<SqlDatabase> {
       DatabaseSync: new (path: string) => NodeDb;
     };
     return wrapNode(new DatabaseSync(path));
-  } catch {
-    return createMemoryDatabase();
+  } catch (cause) {
+    throw new Error("无法打开 SQLite 数据库，需要可用的 SQLite 驱动与数据目录", { cause });
   }
 }
 

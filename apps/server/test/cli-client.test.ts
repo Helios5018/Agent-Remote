@@ -10,6 +10,7 @@ import {
   buildRenameWorkspaceArgs,
   buildSendKeyArgs,
   buildSendTextArgs,
+  buildTerminalInputArgs,
 } from "../src/cmux/control.ts";
 import type { CommandRunner } from "../src/cmux/exec.ts";
 import { RAW_READ_SCREEN, RAW_TOP, RAW_TREE } from "./fixtures.ts";
@@ -123,8 +124,10 @@ describe("CmuxCliClient", () => {
   });
 
   it("rename-tab / rename-workspace 走参数数组，不经过 shell", async () => {
-    expect(buildRenameTabArgs("SURF-11", "新名字")).toEqual([
+    expect(buildRenameTabArgs("SURF-11", "新名字", "WS-WORLD")).toEqual([
       "rename-tab",
+      "--workspace",
+      "WS-WORLD",
       "--surface",
       "SURF-11",
       "--title",
@@ -142,8 +145,32 @@ describe("CmuxCliClient", () => {
     const client = new CmuxCliClient({ runner });
     await client.renameSurface("SURF-11", "新名字");
     await client.renameWorkspace("ws-1", "评测");
-    expect(calls.at(-2)).toEqual(["rename-tab", "--surface", "SURF-11", "--title", "新名字"]);
+    expect(calls.at(-2)).toEqual(["rename-tab", "--workspace", "WS-WORLD", "--surface", "SURF-11", "--title", "新名字"]);
     expect(calls.at(-1)).toEqual(["rename-workspace", "--workspace", "ws-1", "--", "评测"]);
+  });
+
+  it.each(["SURF-20", "surface:20"])("跨工作区重命名 %s 使用目标归属，不使用当前或调用方工作区", async (surfaceId) => {
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner });
+    await client.renameSurface(surfaceId, "评测新名称");
+    expect(calls.at(-1)).toEqual([
+      "rename-tab", "--workspace", "WS-EVAL", "--surface", surfaceId, "--title", "评测新名称",
+    ]);
+  });
+
+  it("不存在的 surface 不执行改名", async () => {
+    const { runner, calls } = makeRunner();
+    await expect(new CmuxCliClient({ runner }).renameSurface("missing", "名称"))
+      .rejects.toMatchObject({ code: "SURFACE_NOT_FOUND" });
+    expect(calls.some((args) => args[0] === "rename-tab")).toBe(false);
+  });
+
+  it("查到 surface 后若标签页已关闭，将 cmux not_found 转成不存在错误", async () => {
+    const { runner } = makeRunner();
+    const client = new CmuxCliClient({ runner: async (args, options) => args[0] === "rename-tab"
+      ? { stdout: "", stderr: "Error: not_found: 未找到标签页", code: 1 }
+      : runner(args, options) });
+    await expect(client.renameSurface("SURF-20", "名称")).rejects.toMatchObject({ code: "SURFACE_NOT_FOUND" });
   });
 
   it("sendText / sendKey 走参数数组，不经过 shell", async () => {
@@ -160,6 +187,24 @@ describe("CmuxCliClient", () => {
       "继续修改；然后 $(rm -rf /) 重新运行测试",
     ]);
     expect(calls.at(-1)).toEqual(["send-key", "--surface", "SURF-11", "--", "enter"]);
+  });
+
+  it("Ctrl+P 通过 terminal.input 写入控制字节，可靠触发 Pi 模型切换", async () => {
+    expect(buildTerminalInputArgs("SURF-PI", "\x10")).toEqual([
+      "rpc",
+      "terminal.input",
+      JSON.stringify({ terminal_id: "SURF-PI", text: "\x10" }),
+    ]);
+
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner });
+    await client.sendKey("SURF-PI", "ctrl+p");
+
+    expect(calls.at(-1)).toEqual([
+      "rpc",
+      "terminal.input",
+      JSON.stringify({ terminal_id: "SURF-PI", text: "\x10" }),
+    ]);
   });
 
   it("翻页也是 send-key，但走独立入口", async () => {
@@ -321,5 +366,42 @@ describe("超时与异常", () => {
     });
     const client = new CmuxCliClient({ runner: runner as unknown as CommandRunner });
     await expect(client.getTree()).rejects.toThrow("boom");
+  });
+});
+
+describe("创建拓扑", () => {
+  it("workspace 走结构化 RPC，分屏显式指定来源，且只唤醒新终端", async () => {
+    const calls: string[][] = [];
+    const runner: CommandRunner = async args => {
+      calls.push(args);
+      return { code: 0, stderr: "", stdout: JSON.stringify({
+        workspace_id: "new-workspace", surface_id: "new-surface", pane_id: "new-pane",
+      }) };
+    };
+    const client = new CmuxCliClient({ runner });
+    expect(await client.createWorkspace("window:1")).toMatchObject({ workspaceId: "new-workspace" });
+    expect(JSON.parse(calls[0]![2]!)).toEqual({ window_id: "window:1", focus: false });
+    await client.createPane("target-workspace", "source-surface");
+    expect(calls[2]).toEqual(["--id-format", "both", "new-split", "right", "--workspace",
+      "target-workspace", "--surface", "source-surface", "--focus", "false", "--json"]);
+    expect(calls[1]).toEqual(["send-key", "--surface", "new-surface", "--", "enter"]);
+    expect(calls[3]).toEqual(calls[1]);
+    await expect(client.createPane("", "source")).rejects.toThrow();
+    await expect(client.createPane("target", "")).rejects.toThrow();
+  });
+
+  it("cmux 创建失败时向上报告", async () => {
+    const client = new CmuxCliClient({ runner: async () => ({ code: 1, stderr: "split limit", stdout: "" }) });
+    await expect(client.createPane("workspace", "surface")).rejects.toThrow("split limit");
+  });
+});
+
+describe("关闭 workspace CLI", () => {
+  it("必须明确目标，并调用整体关闭命令", async () => {
+    const { runner, calls } = makeRunner();
+    const client = new CmuxCliClient({ runner });
+    await expect(client.closeWorkspace("")).rejects.toThrow();
+    await client.closeWorkspace("WS-WORLD");
+    expect(calls).toContainEqual(["close-workspace", "--workspace", "WS-WORLD"]);
   });
 });

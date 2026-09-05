@@ -168,6 +168,24 @@ export class FakeCmuxClient implements CmuxClient {
     };
   }
 
+  async createWorkspace(_windowId?: string): Promise<CreatedSurface> {
+    const id = crypto.randomUUID();
+    const paneId = crypto.randomUUID();
+    this.workspaces.push({ id, ref: `workspace:${id}`, title: "新 Workspace",
+      panes: [{ id: paneId, ref: `pane:${paneId}`, surfaces: [] }] });
+    return this.createSurface({ paneId: paneId, workspaceId: id });
+  }
+
+  async createPane(workspaceId: string, surfaceId: string): Promise<CreatedSurface> {
+    const workspace = this.workspaces.find(w => w.id === workspaceId);
+    if (!workspace || !workspace.panes.some(p => p.surfaces.some(s => s.id === surfaceId))) {
+      throw new CmuxError("workspace 或 surface 不存在", "WORKSPACE_NOT_FOUND");
+    }
+    const id = crypto.randomUUID();
+    workspace.panes.push({ id, ref: `pane:${id}`, surfaces: [] });
+    return this.createSurface({ paneId: id, workspaceId });
+  }
+
   async sendText(surfaceId: string, text: string): Promise<void> {
     const surface = this.findSurface(surfaceId);
     if (!surface) throw new Error(`surface not found: ${surfaceId}`);
@@ -253,6 +271,13 @@ export class FakeCmuxClient implements CmuxClient {
     const workspace = this.workspaces.find((item) => item.id === workspaceId || item.ref === workspaceId);
     if (!workspace) throw new CmuxError(`workspace 不存在: ${workspaceId}`, "WORKSPACE_NOT_FOUND");
     workspace.title = title;
+  }
+
+  async closeWorkspace(workspaceId: string): Promise<void> {
+    const workspace = this.workspaces.find(w => w.id === workspaceId);
+    if (!workspace) throw new CmuxError("workspace 不存在", "WORKSPACE_NOT_FOUND");
+    this.closed.push(...workspace.panes.flatMap(p => p.surfaces.map(s => s.id)));
+    this.workspaces = this.workspaces.filter(w => w.id !== workspaceId);
   }
 
   async closeSurface(surfaceId: string, _workspaceId?: string): Promise<void> {

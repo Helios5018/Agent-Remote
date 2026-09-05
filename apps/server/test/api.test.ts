@@ -823,3 +823,119 @@ describe("健康检查", () => {
     expect(await response.json()).toMatchObject({ ok: true });
   });
 });
+
+describe("读屏不改变活动版本", () => {
+  it("HTTP 网格和文本读取不向状态引擎混入渲染版本", async () => {
+    const harness = await createHarness();
+    const cookie = await harness.loginCookie();
+    harness.engine.applyOutput("sf-11", false, 42);
+    for (const path of ["/api/surfaces/sf-11/grid", "/api/surfaces/sf-11/output", "/api/agents/sf-11"]) {
+      expect((await harness.request(path, { cookie })).status).toBe(200);
+      expect(harness.engine.get("sf-11")?.outputRevision).toBe(42);
+    }
+    harness.store.close();
+  });
+});
+
+describe("创建 workspace 和 pane", () => {
+  it("必须登录才能创建", async () => {
+    const h = await createHarness();
+    for (const path of ["/api/workspaces", "/api/workspaces/ws-1/panes"]) {
+      expect((await h.request(path, { method: "POST" })).status).toBe(401);
+    }
+  });
+
+  it("创建 workspace 带一个终端，新增 pane 只影响指定 workspace", async () => {
+    const h = await createHarness();
+    const cookie = await h.loginCookie();
+    const before = await h.client.getTree();
+    const response = await h.request("/api/workspaces", { method: "POST", cookie });
+    expect(response.status).toBe(201);
+    const created = await response.json() as { workspaceId: string; surfaceId: string };
+    const tree = await h.client.getTree();
+    expect(tree.workspaces).toHaveLength(before.workspaces.length + 1);
+    expect(tree.workspaces.find(w => w.id === created.workspaceId)?.panes[0]?.surfaces[0]?.id).toBe(created.surfaceId);
+    const pane = await h.request(`/api/workspaces/${created.workspaceId}/panes`, { method: "POST", cookie });
+    expect(pane.status).toBe(201);
+    const next = await h.client.getTree();
+    expect(next.workspaces.find(w => w.id === created.workspaceId)?.panes).toHaveLength(2);
+    expect(next.workspaces.slice(0, before.workspaces.length)).toEqual(before.workspaces);
+    expect((await h.request("/api/workspaces/missing/panes", { method: "POST", cookie })).status).toBe(404);
+  });
+});
+
+describe("二次确认关闭 workspace / pane", () => {
+  it("未登录及未明确确认均不执行关闭", async () => {
+    const h = await createHarness();
+    const cookie = await h.loginCookie();
+    for (const path of ["/api/workspaces/ws-world-model/close", "/api/workspaces/ws-world-model/panes/pane-7/close"]) {
+      expect((await h.request(path, { method: "POST" })).status).toBe(401);
+      for (const body of [{}, { confirm: false, surfaceIds: ["sf-10"] }, { confirm: true }]) {
+        expect((await h.request(path, { method: "POST", cookie, body: JSON.stringify(body) })).status).toBe(428);
+      }
+    }
+    expect(h.client.closed).toEqual([]);
+  });
+
+  it("关闭 pane 包含其全部 surface，保留其他 pane 和 workspace", async () => {
+    const h = await createHarness();
+    const cookie = await h.loginCookie();
+    const before = await h.client.getTree();
+    const response = await h.request("/api/workspaces/ws-world-model/panes/pane-7/close", {
+      method: "POST", cookie, body: JSON.stringify({ confirm: true, surfaceIds: ["sf-11", "sf-10"] }),
+    });
+    expect(response.status).toBe(200);
+    expect(h.client.closed).toEqual(["sf-10", "sf-11"]);
+    const after = await h.client.getTree();
+    expect(after.workspaces[0]?.panes.map(p => p.id)).toEqual(["pane-8"]);
+    expect(after.workspaces[1]).toEqual(before.workspaces[1]);
+    const last = await h.request("/api/workspaces/ws-world-model/panes/pane-8/close", {
+      method: "POST", cookie, body: JSON.stringify({ confirm: true, surfaceIds: ["sf-12"] }),
+    });
+    expect(last.status).toBe(409);
+    expect(h.client.closed).toHaveLength(2);
+  });
+
+  it("workspace 整体关闭所有 pane 和 surface", async () => {
+    const h = await createHarness();
+    const cookie = await h.loginCookie();
+    const result = await h.request("/api/workspaces/ws-world-model/close", {
+      method: "POST", cookie, body: JSON.stringify({ confirm: true, surfaceIds: ["sf-10", "sf-11", "sf-12"] }),
+    });
+    expect(result.status).toBe(200);
+    expect(h.client.closed).toEqual(["sf-10", "sf-11", "sf-12"]);
+    expect((await h.client.getTree()).workspaces.map(w => w.id)).toEqual(["ws-eval"]);
+  });
+
+  it("范围变化、错误归属和不存在的目标不执行关闭", async () => {
+    const h = await createHarness();
+    const cookie = await h.loginCookie();
+    for (const [path, status] of [
+      ["/api/workspaces/ws-world-model/close", 409],
+      ["/api/workspaces/ws-world-model/panes/pane-7/close", 409],
+      ["/api/workspaces/ws-eval/panes/pane-7/close", 404],
+      ["/api/workspaces/missing/close", 404],
+    ] as const) {
+      expect((await h.request(path, { method: "POST", cookie,
+        body: JSON.stringify({ confirm: true, surfaceIds: ["sf-10"] }) })).status).toBe(status);
+    }
+    expect(h.client.closed).toEqual([]);
+  });
+
+  it("部分关闭失败时报告已关闭数量并同步结构", async () => {
+    const h = await createHarness();
+    const cookie = await h.loginCookie();
+    const original = h.client.closeSurface.bind(h.client);
+    h.client.closeSurface = async (id, workspaceId) => {
+      if (id === "sf-11") throw new Error("测试错误");
+      await original(id, workspaceId);
+    };
+    const result = await h.request("/api/workspaces/ws-world-model/panes/pane-7/close", {
+      method: "POST", cookie, body: JSON.stringify({ confirm: true, surfaceIds: ["sf-10", "sf-11"] }),
+    });
+    expect(result.status).toBe(503);
+    expect(await result.text()).toContain("已关闭 1 个 surface");
+    expect(h.client.closed).toEqual(["sf-10"]);
+    expect((await h.client.getTree()).workspaces[0]?.panes[0]?.surfaces.map(s => s.id)).toEqual(["sf-11"]);
+  });
+});

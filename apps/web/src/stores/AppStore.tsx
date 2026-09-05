@@ -1,3 +1,4 @@
+import { SurfaceCache } from "./surface-cache.ts";
 import {
   createContext,
   useCallback,
@@ -6,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import type {
@@ -23,13 +25,9 @@ import type {
   SurfaceGrid,
   SurfaceHistoryResponse,
 } from "@car/protocol";
+import { patchAgent } from "./selectors.ts";
 import { api, ApiError } from "../api.ts";
 import { useRealtime, type ConnectionState } from "../hooks/useRealtime.ts";
-
-interface SurfaceContent {
-  content: string;
-  revision: number;
-}
 
 interface AppStoreValue {
   session: SessionInfo | null;
@@ -39,9 +37,7 @@ interface AppStoreValue {
   tree: CmuxTree | null;
   connection: ConnectionState;
   error: string | null;
-  contents: Record<string, SurfaceContent>;
-  /** surfaceId → 彩色渲染网格。 */
-  grids: Record<string, SurfaceGrid>;
+  surfaceCache: SurfaceCache;
 
   login(token: string): Promise<void>;
   logout(): Promise<void>;
@@ -62,6 +58,10 @@ interface AppStoreValue {
   sendInput(surfaceId: string, text: string, submit: boolean): Promise<void>;
   sendKey(surfaceId: string, key: CmuxKey, confirm?: boolean): Promise<void>;
   renameSurface(surfaceId: string, title: string): Promise<void>;
+  closeWorkspace(workspaceId: string, surfaceIds: string[]): Promise<void>;
+  closePane(workspaceId: string, paneId: string, surfaceIds: string[]): Promise<void>;
+  createWorkspace(): Promise<string>;
+  createPane(workspaceId: string): Promise<string>;
   renameWorkspace(workspaceId: string, title: string): Promise<void>;
   /** 关掉 cmux 里的真实 tab；失败会抛出。 */
   closeSurface(surfaceId: string): Promise<void>;
@@ -69,7 +69,6 @@ interface AppStoreValue {
   scrollSurface(surfaceId: string, action: ScrollAction): Promise<void>;
   /** 拉网格之外更早的历史（纯文本）。 */
   loadHistory(surfaceId: string, drop: number): Promise<SurfaceHistoryResponse | null>;
-  refreshOutput(surfaceId: string): Promise<void>;
   refreshGrid(surfaceId: string): Promise<void>;
   clearError(): void;
 }
@@ -81,12 +80,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [inbox, setInbox] = useState<Inbox | null>(null);
   const [tree, setTree] = useState<CmuxTree | null>(null);
-  const [contents, setContents] = useState<Record<string, SurfaceContent>>({});
-  const [grids, setGrids] = useState<Record<string, SurfaceGrid>>({});
+  const [surfaceCache] = useState(() => new SurfaceCache());
+  const requestEpoch = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const authenticated = session?.authenticated === true;
-  const inboxRef = useRef<Inbox | null>(null);
-  inboxRef.current = inbox;
+  const viewingRef = useRef<string | null>(null);
 
   const handleMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
@@ -94,23 +92,22 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         setInbox(message.inbox);
         break;
       case "agent.status_changed":
-        setInbox((current) => (current ? patchAgent(current, message.agent) : current));
-        break;
-      case "surface.snapshot":
-        setContents((current) => ({
-          ...current,
-          [message.surfaceId]: { content: message.content, revision: message.revision },
-        }));
+        setInbox((current) => patchAgent(current, message.agent));
         break;
       case "surface.grid":
-        setGrids((current) => ({ ...current, [message.surfaceId]: message.grid }));
+        surfaceCache.set(message.surfaceId, message.grid);
         break;
       default:
         break;
     }
-  }, []);
+  }, [surfaceCache]);
 
-  const { state: connection, subscribe } = useRealtime({ enabled: authenticated, onMessage: handleMessage });
+  const { state: connection, subscribe: subscribeRealtime } = useRealtime({ enabled: authenticated, onMessage: handleMessage });
+
+  const subscribe = useCallback((surfaceId: string | null) => {
+    viewingRef.current = surfaceId;
+    subscribeRealtime(surfaceId);
+  }, [subscribeRealtime]);
 
   /** 统一处理接口错误。401 要把本地会话标成未登录。 */
   const noteApiError = useCallback((caught: unknown) => {
@@ -124,17 +121,31 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const withError = useCallback(
     async <T,>(fn: () => Promise<T>): Promise<T | null> => {
+      const epoch = requestEpoch.current;
       try {
         const result = await fn();
+        if (epoch !== requestEpoch.current) return null;
         setError(null);
         return result;
       } catch (caught) {
+        if (epoch !== requestEpoch.current) return null;
         noteApiError(caught);
         return null;
       }
     },
     [noteApiError],
   );
+
+  const write = useCallback(async <T,>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      const result = await fn();
+      setError(null);
+      return result;
+    } catch (caught) {
+      noteApiError(caught);
+      throw caught;
+    }
+  }, [noteApiError]);
 
   const refreshInbox = useCallback(async () => {
     const result = await withError(() => api.agents());
@@ -143,28 +154,18 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
   const refreshTree = useCallback(async () => {
     const result = await withError(() => api.tree());
-    if (result) setTree(result);
-  }, [withError]);
-
-  const refreshOutput = useCallback(
-    async (surfaceId: string) => {
-      const snapshot = await withError(() => api.output(surfaceId));
-      if (snapshot) {
-        setContents((current) => ({
-          ...current,
-          [surfaceId]: { content: snapshot.content, revision: snapshot.revision },
-        }));
-      }
-    },
-    [withError],
-  );
+    if (result) {
+      setTree(result);
+      surfaceCache.retain(new Set(result.workspaces.flatMap(w => w.panes.flatMap(p => p.surfaces.map(s => s.id)))));
+    }
+  }, [withError, surfaceCache]);
 
   const refreshGrid = useCallback(
     async (surfaceId: string) => {
       const grid = await withError(() => api.grid(surfaceId));
-      if (grid) setGrids((current) => ({ ...current, [surfaceId]: grid }));
+      if (grid) surfaceCache.set(surfaceId, grid);
     },
-    [withError],
+    [withError, surfaceCache],
   );
 
   useEffect(() => {
@@ -188,23 +189,39 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     if (authenticated) void refreshInbox();
   }, [authenticated, refreshInbox]);
 
-  // WebSocket 断开期间退化为轮询，保证信息不停更新。
+  const resync = useCallback(async () => {
+    await Promise.all([refreshInbox(), refreshTree(),
+      ...(viewingRef.current ? [refreshGrid(viewingRef.current)] : []),
+    ]);
+  }, [refreshInbox, refreshTree, refreshGrid]);
+
+  useEffect(() => {
+    if (authenticated && connection === "open") void resync();
+  }, [authenticated, connection, resync]);
+
+  // 断线时列表、拓扑和当前画面一起降级；单轮完成前不发起下一轮。
+
   useEffect(() => {
     if (!authenticated || connection === "open") return;
-    const timer = window.setInterval(() => void refreshInbox(), 5000);
-    return () => window.clearInterval(timer);
-  }, [authenticated, connection, refreshInbox]);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      if (document.visibilityState === "visible") await resync();
+      if (!cancelled) timer = setTimeout(poll, 5000);
+    };
+    void poll();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [authenticated, connection, resync]);
 
-  const value = useMemo<AppStoreValue>(
+  useEffect(() => {
+    if (!authenticated) {
+      requestEpoch.current += 1;
+      surfaceCache.clear();
+    }
+  }, [authenticated, surfaceCache]);
+
+  const actions = useMemo<Omit<AppStoreValue, "session" | "loading" | "inbox" | "tree" | "connection" | "error" | "surfaceCache">>(
     () => ({
-      session,
-      loading,
-      inbox,
-      tree,
-      connection,
-      error,
-      contents,
-      grids,
 
       async login(token: string) {
         const info = await withError(() => api.login(token));
@@ -213,10 +230,12 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
 
       async logout() {
         const info = await withError(() => api.logout());
-        if (info) setSession(info);
+        if (!info) return;
+        setSession(info);
         setInbox(null);
         setTree(null);
-        setGrids({});
+        requestEpoch.current += 1;
+        surfaceCache.clear();
       },
 
       refreshInbox,
@@ -225,11 +244,14 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       async openSession(surfaceId: string) {
         // 非 Agent 的 surface（shell / browser）没有 Agent 状态，
         // 但照样能看画面、发输入，所以 404 不算错误，直接退化成读输出。
+        const epoch = requestEpoch.current;
         let detail: Awaited<ReturnType<typeof api.agent>> | null = null;
         try {
           detail = await api.agent(surfaceId);
+          if (epoch !== requestEpoch.current) return null;
           setError(null);
         } catch (caught) {
+          if (epoch !== requestEpoch.current) return null;
           if (caught instanceof ApiError && caught.status === 404) {
             // 非 Agent 的 surface 没有状态，但照样能看彩色画面
             await refreshGrid(surfaceId);
@@ -241,13 +263,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           setError(caught instanceof Error ? caught.message : String(caught));
           return null;
         }
-        if (detail.snapshot) {
-          setContents((current) => ({
-            ...current,
-            [surfaceId]: { content: detail.snapshot!.content, revision: detail.snapshot!.revision },
-          }));
-        }
-        setInbox((current) => (current ? patchAgent(current, detail.agent) : current));
+        setInbox((current) => patchAgent(current, detail.agent));
         return detail.agent;
       },
 
@@ -272,25 +288,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
        * 写操作故意不走 withError：它把异常吞成 null，调用方分不清成功还是失败，
        * Composer 就会在发送失败后照样清空输入框 —— 表现出来就是「点了没反应，字还没了」。
        */
-      async sendInput(surfaceId: string, text: string, submit: boolean) {
-        try {
-          await api.sendInput(surfaceId, text, submit);
-          setError(null);
-        } catch (caught) {
-          noteApiError(caught);
-          throw caught;
-        }
-      },
+      sendInput: (surfaceId: string, text: string, submit: boolean) =>
+        write(async () => { await api.sendInput(surfaceId, text, submit); }),
 
-      async sendKey(surfaceId: string, key: CmuxKey, confirm = false) {
-        try {
-          await api.sendKey(surfaceId, key, confirm);
-          setError(null);
-        } catch (caught) {
-          noteApiError(caught);
-          throw caught;
-        }
-      },
+      sendKey: (surfaceId: string, key: CmuxKey, confirm = false) =>
+        write(async () => { await api.sendKey(surfaceId, key, confirm); }),
 
       async renameSurface(surfaceId: string, title: string) {
         try {
@@ -302,6 +304,27 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           throw caught;
         }
       },
+
+      closeWorkspace: (workspaceId, surfaceIds) => write(async () => {
+        try { await api.closeWorkspace(workspaceId, surfaceIds); }
+        finally { await Promise.all([refreshTree(), refreshInbox()]); }
+      }),
+      closePane: (workspaceId, paneId, surfaceIds) => write(async () => {
+        try { await api.closePane(workspaceId, paneId, surfaceIds); }
+        finally { await Promise.all([refreshTree(), refreshInbox()]); }
+      }),
+
+      createWorkspace: () => write(async () => {
+        const result = await api.createWorkspace();
+        await Promise.all([refreshTree(), refreshInbox()]);
+        return result.workspaceId;
+      }),
+
+      createPane: (workspaceId: string) => write(async () => {
+        const result = await api.createPane(workspaceId);
+        await Promise.all([refreshTree(), refreshInbox()]);
+        return result.workspaceId;
+      }),
 
       async renameWorkspace(workspaceId: string, title: string) {
         try {
@@ -318,16 +341,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         try {
           await api.closeSurface(surfaceId);
           setError(null);
-          setGrids((current) => {
-            const next = { ...current };
-            delete next[surfaceId];
-            return next;
-          });
-          setContents((current) => {
-            const next = { ...current };
-            delete next[surfaceId];
-            return next;
-          });
+          surfaceCache.forget(surfaceId);
           await Promise.all([refreshTree(), refreshInbox()]);
         } catch (caught) {
           noteApiError(caught);
@@ -336,35 +350,30 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       },
 
       async scrollSurface(surfaceId: string, action: ScrollAction) {
-        const result = await withError(() => api.scroll(surfaceId, action));
-        if (result) setGrids((current) => ({ ...current, [surfaceId]: result.grid }));
+        const result = await write(() => api.scroll(surfaceId, action));
+        if (result) surfaceCache.set(surfaceId, result.grid);
       },
 
       loadHistory: (surfaceId: string, drop: number) => withError(() => api.history(surfaceId, drop)),
 
-      refreshOutput,
       refreshGrid,
 
       clearError: () => setError(null),
     }),
     [
-      session,
-      loading,
-      inbox,
-      tree,
-      connection,
-      error,
-      contents,
-      grids,
+      surfaceCache,
+      write,
       refreshInbox,
       refreshTree,
-      refreshOutput,
       refreshGrid,
       subscribe,
       withError,
       noteApiError,
     ],
   );
+
+  const value = useMemo(() => ({ session, loading, inbox, tree, connection, error, surfaceCache, ...actions }),
+    [session, loading, inbox, tree, connection, error, surfaceCache, actions]);
 
   return <AppStoreContext.Provider value={value}>{children}</AppStoreContext.Provider>;
 }
@@ -375,51 +384,11 @@ export function useAppStore(): AppStoreValue {
   return value;
 }
 
-/** 用单个 Agent 的新状态原地更新 Inbox（避免整页重排闪动）。 */
-export function patchAgent(inbox: Inbox, agent: AgentState): Inbox {
-  let found = false;
-  const groups = inbox.groups.map((group) => ({
-    ...group,
-    agents: group.agents.map((item) => {
-      if (item.surfaceId !== agent.surfaceId) return item;
-      found = true;
-      return agent;
-    }),
-  }));
-  if (!found) return inbox;
-  return { ...inbox, groups };
-}
 
-/** 从 Inbox 里找一个 Agent。 */
-export function findAgent(inbox: Inbox | null, surfaceId: string): AgentState | undefined {
-  if (!inbox) return undefined;
-  for (const group of inbox.groups) {
-    const hit = group.agents.find((agent) => agent.surfaceId === surfaceId);
-    if (hit) return hit;
-  }
-  return undefined;
-}
-
-/** surfaceId → { surface, workspace }，用于给没有 Agent 的 surface 也标出归属。 */
-export function findSurface(
-  tree: CmuxTree | null,
-  surfaceId: string,
-): { surface: CmuxSurface; workspace: CmuxWorkspace } | undefined {
-  if (!tree) return undefined;
-  for (const workspace of tree.workspaces) {
-    for (const pane of workspace.panes) {
-      const surface = pane.surfaces.find((item) => item.id === surfaceId);
-      if (surface) return { surface, workspace };
-    }
-  }
-  return undefined;
-}
-
-/** 把 Inbox 摊平成 surfaceId → AgentState，树视图逐行查状态用。 */
-export function agentsBySurface(inbox: Inbox | null): Map<string, AgentState> {
-  const map = new Map<string, AgentState>();
-  for (const group of inbox?.groups ?? []) {
-    for (const agent of group.agents) map.set(agent.surfaceId, agent);
-  }
-  return map;
+/** 只订阅当前终端帧，不让网格变化重渲染整棵应用树。 */
+export function useSurfaceGrid(surfaceId: string): SurfaceGrid | undefined {
+  const { surfaceCache } = useAppStore();
+  const subscribe = useCallback((listener: () => void) => surfaceCache.subscribe(surfaceId, listener), [surfaceCache, surfaceId]);
+  const snapshot = useCallback(() => surfaceCache.get(surfaceId), [surfaceCache, surfaceId]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

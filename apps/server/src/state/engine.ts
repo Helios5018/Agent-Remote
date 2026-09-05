@@ -1,14 +1,11 @@
 import {
-  ATTENTION_PRIORITY,
-  attentionGroupOf,
+  buildInbox,
   type AgentEvent,
   type AgentState,
   type AgentStatus,
-  type AttentionGroup,
   type CmuxSurface,
   type CmuxTree,
   type Inbox,
-  type InboxSummary,
 } from "@car/protocol";
 import { agentSurfaces } from "../cmux/discovery.ts";
 import type { StateStore } from "./store.ts";
@@ -426,6 +423,10 @@ export class StateEngine {
         this.agents.delete(surfaceId);
         this.closedAt.delete(surfaceId);
         this.outputChangedAt.delete(surfaceId);
+        this.viewing.delete(surfaceId);
+        for (const [sessionId, id] of this.sessionIndex) {
+          if (id === surfaceId) this.sessionIndex.delete(sessionId);
+        }
         try {
           this.store?.deleteAgent(surfaceId);
         } catch {
@@ -486,37 +487,8 @@ export class StateEngine {
 
   /** 首页 Attention Inbox（需求文档 §5.1）。 */
   inbox(): Inbox {
-    const now = this.now();
-    const agents = this.list().sort(compareByAttention);
-
-    const groups: Array<{ group: AttentionGroup; agents: AgentState[] }> = [
-      { group: "NEEDS_YOU", agents: [] },
-      { group: "WORKING", agents: [] },
-      { group: "IDLE", agents: [] },
-    ];
-    for (const agent of agents) {
-      const group = groups.find((g) => g.group === attentionGroupOf(agent.status));
-      group?.agents.push(agent);
-    }
-
-    const summary: InboxSummary = {
-      needsYou: agents.filter(
-        (a) => a.status === "NEEDS_APPROVAL" || a.status === "NEEDS_INPUT" || a.status === "RESPONDED_UNREAD",
-      ).length,
-      working: agents.filter((a) => a.status === "WORKING" || a.status === "POSSIBLY_STALE").length,
-      error: agents.filter((a) => a.status === "ERROR").length,
-      idle: agents.filter((a) => a.status === "IDLE" || a.status === "CLOSED").length,
-      total: agents.length,
-    };
-
-    return { summary, groups: groups.filter((g) => g.agents.length > 0), generatedAt: now };
+    return buildInbox(this.list(), this.now());
   }
 }
 
-/** ERROR → NEEDS_APPROVAL → NEEDS_INPUT → RESPONDED_UNREAD → POSSIBLY_STALE → WORKING → IDLE */
-export function compareByAttention(a: AgentState, b: AgentState): number {
-  const byStatus = ATTENTION_PRIORITY[a.status] - ATTENTION_PRIORITY[b.status];
-  if (byStatus !== 0) return byStatus;
-  // 同状态里，最近有动静的排前面。
-  return b.lastActivityAt - a.lastActivityAt;
-}
+export { compareByAttention } from "@car/protocol";

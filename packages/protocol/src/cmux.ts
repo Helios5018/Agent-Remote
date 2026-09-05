@@ -81,8 +81,9 @@ export const CmuxKeySchema = z.enum([
   "down",
   "left",
   "right",
-  // Ctrl 组合键只保留中断：ctrl+d 会直接关掉 surface，其余用不上
+  // Ctrl+D 会直接关掉 surface，因此不提供；Ctrl+P 给 Pi 快速切换模型。
   "ctrl+c",
+  "ctrl+p",
 ]);
 export type CmuxKey = z.infer<typeof CmuxKeySchema>;
 
@@ -147,6 +148,9 @@ const KEY_ALIASES: Record<string, CmuxKey> = {
   "ctrl+c": "ctrl+c",
   "ctrl-c": "ctrl+c",
   ctrlc: "ctrl+c",
+  "ctrl+p": "ctrl+p",
+  "ctrl-p": "ctrl+p",
+  ctrlp: "ctrl+p",
 };
 
 export function normalizeKey(raw: string): CmuxKey | null {

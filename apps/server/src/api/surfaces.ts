@@ -1,3 +1,5 @@
+import { sleep } from "@car/shared";
+import { scrollOnce, scrollToBottom } from "../services/surface-scroll.ts";
 import { Hono } from "hono";
 import {
   CloseSurfaceRequestSchema,
@@ -16,7 +18,7 @@ import {
 import { apiError, type AppContext } from "../context.ts";
 import { CmuxError } from "../cmux/client.ts";
 import { resolvePaneCwd } from "../cmux/cwd.ts";
-import { safeJson } from "./auth.ts";
+import { safeJson } from "./http.ts";
 
 /**
  * Surface 读写（需求文档 §22 / §23.3）。
@@ -90,7 +92,7 @@ export function createSurfaceRoutes(ctx: AppContext) {
         lines: Number(c.req.query("lines") ?? ctx.config.maxOutputLines) || ctx.config.maxOutputLines,
         scrollback: c.req.query("scrollback") === "1",
       });
-      ctx.engine.applyOutput(surfaceId, false, snapshot.revision);
+
       return c.json(snapshot);
     } catch (error) {
       return handleCmuxError(c, error);
@@ -102,7 +104,7 @@ export function createSurfaceRoutes(ctx: AppContext) {
     const surfaceId = c.req.param("surfaceId");
     try {
       const grid = await ctx.client.readGrid(surfaceId);
-      ctx.engine.applyOutput(surfaceId, false, grid.revision);
+
       return c.json(grid);
     } catch (error) {
       return handleCmuxError(c, error);
@@ -287,32 +289,6 @@ function findPane(
   return null;
 }
 
-/** 翻一屏，等 TUI 重绘完再截图 —— 读太快会拿到翻页前的旧画面。 */
-async function scrollOnce(ctx: AppContext, surfaceId: string, key: ScrollKey): Promise<SurfaceGrid> {
-  await ctx.client.scrollSurface(surfaceId, key);
-  await sleep(ctx.config.scrollRedrawDelayMs);
-  return ctx.client.readGrid(surfaceId);
-}
-
-/**
- * 回到最新一屏。
- *
- * TUI 没有通用的「跳到底部」键（实测 Claude Code 收到 `end` 画面不动），
- * 只能连按 pagedown 直到画面不再变化。revision 只在内容变化时自增，
- * 拿它当「到底了」的判据；步数封顶兜住「Agent 正在刷输出，画面一直在变」。
- */
-async function scrollToBottom(ctx: AppContext, surfaceId: string): Promise<SurfaceGrid> {
-  let grid = await ctx.client.readGrid(surfaceId);
-  for (let step = 0; step < SCROLL_TO_BOTTOM_MAX_STEPS; step += 1) {
-    const next = await scrollOnce(ctx, surfaceId, "pagedown");
-    if (next.revision === grid.revision) return next;
-    grid = next;
-  }
-  return grid;
-}
-
-const SCROLL_TO_BOTTOM_MAX_STEPS = 12;
-
 /** 新建 surface 后等 shell 初始化完再敲启动命令。 */
 const LAUNCH_DELAY_MS = 150;
 
@@ -320,10 +296,6 @@ function clampInt(raw: string | undefined, fallback: number, min: number, max: n
   const value = Number(raw);
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(value)));
-}
-
-function sleep(ms: number): Promise<void> {
-  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
 
 function handleCmuxError(

@@ -15,3 +15,6 @@ dist/
 
 # 备份文件
 *.bak
+
+# 浏览器验收临时输出
+.playwright-mcp/

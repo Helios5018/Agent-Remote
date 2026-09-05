@@ -1,9 +1,9 @@
 import { Hono } from "hono";
-import { RenameTitleRequestSchema } from "@car/protocol";
+import { CloseTopologyRequestSchema, RenameTitleRequestSchema } from "@car/protocol";
 import { apiError, type AppContext } from "../context.ts";
 import { CmuxError } from "../cmux/client.ts";
 import { type Env } from "../security/middleware.ts";
-import { safeJson } from "./auth.ts";
+import { safeJson } from "./http.ts";
 
 /** GET /api/tree —— cmux 真实结构：Workspace → Pane → Surface（需求文档 §6 / §22）。 */
 export function createWorkspaceRoutes(ctx: AppContext) {
@@ -29,6 +29,88 @@ export function createWorkspaceRoutes(ctx: AppContext) {
 /** POST /api/workspaces/:workspaceId/title —— 改 cmux workspace 的真实名字。 */
 export function createWorkspaceWriteRoutes(ctx: AppContext) {
   const app = new Hono<Env>();
+
+  async function created(surface: Awaited<ReturnType<AppContext["client"]["createWorkspace"]>>, action: string) {
+    ctx.store.audit({ at: ctx.now(), action, surfaceId: surface.surfaceId,
+      detail: `workspace=${surface.workspaceId}` });
+    ctx.engine.syncTree(await ctx.client.getTree());
+    ctx.hub.broadcast({ type: "agent.list_changed", inbox: ctx.engine.inbox() });
+    ctx.poller?.scheduleImmediate(surface.surfaceId);
+    return { ok: true as const, ...surface };
+  }
+
+  app.post("/", async (c) => {
+    try {
+      const tree = await ctx.client.getTree();
+      const windowId = (tree.workspaces.find(w => w.selected) ?? tree.workspaces[0])?.windowRef;
+      return c.json(await created(await ctx.client.createWorkspace(windowId), "workspace.create"), 201);
+    } catch (error) {
+      return c.json(apiError("CMUX_UNAVAILABLE", error instanceof Error ? error.message : "增加 workspace 失败"), 503);
+    }
+  });
+
+  app.post("/:workspaceId/panes", async (c) => {
+    try {
+      const tree = await ctx.client.getTree();
+      const id = c.req.param("workspaceId");
+      const workspace = tree.workspaces.find(w => w.id === id || w.ref === id);
+      if (!workspace) return c.json(apiError("NOT_FOUND", "workspace 不存在"), 404);
+      const pane = workspace.panes.find(p => p.focused) ?? workspace.panes[0];
+      const surface = pane?.surfaces.find(s => s.selected) ?? pane?.surfaces[0];
+      if (!surface) return c.json(apiError("NOT_FOUND", "workspace 没有可分屏的 surface"), 404);
+      return c.json(await created(await ctx.client.createPane(workspace.id, surface.id), "pane.create"), 201);
+    } catch (error) {
+      return c.json(apiError("CMUX_UNAVAILABLE", error instanceof Error ? error.message : "增加 pane 失败"), 503);
+    }
+  });
+
+  // pane 没有可用的整体关闭 RPC：逐个关闭确认范围内的 surface，最后一个关闭时分屏自动移除。
+  for (const scope of ["workspace", "pane"] as const) {
+    const path = scope === "workspace" ? "/:workspaceId/close" : "/:workspaceId/panes/:paneId/close";
+    app.post(path, async (c) => {
+      const parsed = CloseTopologyRequestSchema.safeParse(await safeJson(c.req.raw));
+      if (!parsed.success) return c.json(apiError("CONFIRM_REQUIRED", "请确认关闭范围后再操作"), 428);
+      const closedSurfaceIds: string[] = [];
+      try {
+        const tree = await ctx.client.getTree(true);
+        const workspace = tree.workspaces.find(w => w.id === c.req.param("workspaceId"));
+        if (!workspace) return c.json(apiError("NOT_FOUND", "workspace 已不存在，请刷新"), 404);
+        const pane = scope === "pane" ? workspace.panes.find(p => (p.id ?? p.ref) === c.req.param("paneId")) : undefined;
+        if (scope === "pane" && !pane) return c.json(apiError("NOT_FOUND", "pane 已不存在，请重新选择"), 404);
+        if (scope === "pane" && workspace.panes.length <= 1) {
+          return c.json(apiError("LAST_PANE", "这是最后一个 pane，请使用关闭 workspace"), 409);
+        }
+        const ids = (pane ? pane.surfaces : workspace.panes.flatMap(p => p.surfaces)).map(s => s.id);
+        const confirmed = new Set(parsed.data.surfaceIds);
+        if (ids.length !== confirmed.size || !ids.every(id => confirmed.has(id))) {
+          return c.json(apiError("TOPOLOGY_CHANGED", "终端列表已变化，请取消并重新查看关闭范围"), 409);
+        }
+        if (scope === "workspace") {
+          await ctx.client.closeWorkspace(workspace.id);
+          closedSurfaceIds.push(...ids);
+        } else {
+          for (const id of ids) {
+            await ctx.client.closeSurface(id, workspace.id);
+            closedSurfaceIds.push(id);
+          }
+        }
+        ctx.store.audit({ at: ctx.now(), action: `${scope}.close`,
+          detail: `workspace=${workspace.id} pane=${pane?.id ?? pane?.ref ?? "all"} count=${closedSurfaceIds.length}` });
+        return c.json({ ok: true as const });
+      } catch (error) {
+        ctx.store.audit({ at: ctx.now(), action: `${scope}.close_failed`,
+          detail: `workspace=${c.req.param("workspaceId")} closed=${closedSurfaceIds.length}` });
+        const detail = error instanceof Error ? error.message : "cmux 操作失败";
+        return c.json(apiError("CMUX_UNAVAILABLE", `关闭未完成（已关闭 ${closedSurfaceIds.length} 个 surface）：${detail}。请取消并刷新查看剩余项。`), 503);
+      } finally {
+        // 部分成功也要同步，防止已关闭的终端继续显示为运行中。
+        try {
+          ctx.engine.syncTree(await ctx.client.getTree());
+          ctx.hub.broadcast({ type: "agent.list_changed", inbox: ctx.engine.inbox() });
+        } catch { /* 保留原始关闭结果，后续轮询恢复。 */ }
+      }
+    });
+  }
 
   app.post("/:workspaceId/title", async (c) => {
     const workspaceId = c.req.param("workspaceId");

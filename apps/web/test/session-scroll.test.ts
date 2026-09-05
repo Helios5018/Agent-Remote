@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { alignAfterScroll } from "../src/pages/SessionPage.tsx";
+import { alignAfterScroll } from "../src/features/session/scroll.ts";
 
 describe("翻页后的落点", () => {
   it("往回翻停在新一屏的底部 —— 那里才接着刚看到的第一行", () => {

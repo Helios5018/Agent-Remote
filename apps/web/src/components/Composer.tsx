@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { CmuxKey } from "@car/protocol";
+import type { AgentKind, CmuxKey } from "@car/protocol";
 import { DANGEROUS_KEY_HINT, isDangerousKey } from "@car/protocol";
 
 /** 粘贴（或合成后的文本）达到这么多行，自动进展开编辑。 */
@@ -49,8 +49,30 @@ const KEY_GROUPS: KeyButton[][] = [
     { key: "left", label: "←", title: "左" },
     { key: "right", label: "→", title: "右" },
   ],
-  [{ key: "ctrl+c", label: "Ctrl+C", title: DANGEROUS_KEY_HINT["ctrl+c"] ?? "中断" }],
 ];
+
+const INTERRUPT_KEY: KeyButton = {
+  key: "ctrl+c",
+  label: "Ctrl+C",
+  title: DANGEROUS_KEY_HINT["ctrl+c"] ?? "中断",
+};
+
+/** Pi 用 Ctrl+P 打开模型选择器；其他 Agent 不展示这个专属快捷键。 */
+export function composerKeysForAgent(agentKind?: AgentKind | null): CmuxKey[] {
+  return keyGroupsForAgent(agentKind).flatMap((group) => group.map(({ key }) => key));
+}
+
+function keyGroupsForAgent(agentKind?: AgentKind | null): KeyButton[][] {
+  return [
+    ...KEY_GROUPS,
+    [
+      INTERRUPT_KEY,
+      ...(agentKind === "pi"
+        ? [{ key: "ctrl+p" as const, label: "Ctrl+P", title: "切换 Pi 模型" }]
+        : []),
+    ],
+  ];
+}
 
 function describeFailure(caught: unknown): string {
   const reason = caught instanceof Error ? caught.message : String(caught);
@@ -79,11 +101,14 @@ function SizeGlyph({ expanded }: { expanded: boolean }) {
 
 export function Composer({
   collapsible = false,
+  agentKind,
   onSend,
   onKey,
 }: {
   /** 沉浸模式下先收成一条，点开才展开 —— 输入框 + 按键条在手机上要吃掉小半屏。 */
   collapsible?: boolean;
+  /** Pi 会额外显示用于快速切换模型的 Ctrl+P。 */
+  agentKind?: AgentKind | null;
   onSend: (text: string, submit: boolean) => Promise<void>;
   onKey: (key: CmuxKey, confirm: boolean) => Promise<void>;
 }) {
@@ -214,19 +239,6 @@ export function Composer({
 
   return (
     <div ref={composerRef} className={`composer${editorOpen ? " composer-editor-open" : ""}`}>
-      {collapsible ? (
-        <button
-          type="button"
-          className="composer-collapse"
-          onClick={() => {
-            setEditorOpen(false);
-            setExpanded(false);
-          }}
-          title="收起输入区"
-        >
-          收起 ⌄
-        </button>
-      ) : null}
       {failure ? <div className="composer-hint danger-hint">{failure}</div> : null}
       <div className="composer-input-row">
         <div className="composer-input-wrap">
@@ -258,16 +270,41 @@ export function Composer({
               }
             }}
           />
-          <button
-            type="button"
-            className="composer-size-toggle"
-            title={editorOpen ? "还原输入区" : "放大输入区"}
-            aria-label={editorOpen ? "还原输入区" : "放大输入区"}
-            aria-expanded={editorOpen}
-            onClick={() => setEditorOpen((current) => !current)}
-          >
-            <SizeGlyph expanded={editorOpen} />
-          </button>
+          <div className="composer-input-tools">
+            <button
+              type="button"
+              className="composer-size-toggle"
+              title={editorOpen ? "还原输入区" : "放大输入区"}
+              aria-label={editorOpen ? "还原输入区" : "放大输入区"}
+              aria-expanded={editorOpen}
+              onClick={() => setEditorOpen((current) => !current)}
+            >
+              <SizeGlyph expanded={editorOpen} />
+            </button>
+            {collapsible ? (
+              <button
+                type="button"
+                className="composer-collapse"
+                onClick={() => {
+                  setEditorOpen(false);
+                  setExpanded(false);
+                }}
+                title="收起输入区，保留草稿"
+                aria-label="收起输入区"
+              >
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                  <path
+                    d="m4 6 4 4 4-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            ) : null}
+          </div>
         </div>
         <div className="composer-actions">
           <button
@@ -285,7 +322,7 @@ export function Composer({
         className={`key-bar-wrap ${edges.start ? "fade-start" : ""} ${edges.end ? "fade-end" : ""}`}
       >
         <div className="key-bar" ref={keyBarRef} onScroll={syncEdges}>
-          {KEY_GROUPS.map((group, groupIndex) => (
+          {keyGroupsForAgent(agentKind).map((group, groupIndex) => (
             <div className="key-group" key={group[0]?.key ?? groupIndex}>
               {group.map(({ key, label, title }) => (
                 <button

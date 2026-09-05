@@ -1,6 +1,6 @@
 # CMUX Agent Remote
 
-Mac 本地的多 Agent Web 控制中心：通过浏览器 / 手机查看并控制 cmux 里的 Claude Code、Codex CLI、Grok Build、Pi。不是远程 Terminal，核心是「谁在干活、谁在等你」。用法与 API 以 README.md 为准。
+Mac 本地的多 Agent Web 控制中心：通过浏览器 / 手机查看并控制 cmux 里的 Claude Code、Codex CLI、Grok Build、Pi。不是远程 Terminal，核心是「谁在干活、谁在等你」。用法入口为 README.md，API 与集成细节见其文档导航。
 
 ## 怎么跑
 
@@ -31,8 +31,8 @@ bun run dev:web               # 前端 :4319，代理到 :4318
 ## 目录
 
 ```
-apps/server/src/   cmux/ hooks/ state/ realtime/ api/ security/
-apps/web/src/      pages/ components/ hooks/ stores/
+apps/server/src/   cmux/ hooks/ state/ realtime/ api/ services/ security/
+apps/web/src/      pages/ features/ components/ hooks/ stores/ realtime/ styles/
 packages/protocol  共享 Zod schema（前后端）
 packages/shared    时间、缓存、文本清洗
 scripts/           cmux-agent-web-hook + 安装/卸载
@@ -56,6 +56,6 @@ scripts/           cmux-agent-web-hook + 安装/卸载
   新 tab 懒启动，建完必须发一次回车唤醒，否则没有 tty、读画面直接报错；
   工作目录 cmux 不给，只能 `lsof` 反查同 pane 进程的 cwd。
 
-## 当前状态（2026-08-24）
+## 当前状态（2026-09-05）
 
-v0.1.0，第一版可用。远端 `gitlab.vivix.work/Link/Agent-Remote`，分支 `main`。无生产部署。原始需求在 `docs/CMUX Agent Remote — 产品与技术需求文档.md`，已落地差异以 README 为准。未做：完整 Terminal Emulator、多用户、云端 Relay、tmux 长任务、Project 聚合。
+v0.1.0，第一版可用。远端 `gitlab.vivix.work/Link/Agent-Remote`，分支 `main`。支持本地服务经 Sealtun 暴露公网，运行态需另行核验。原始需求在 `docs/archive/CMUX Agent Remote — 产品与技术需求文档.md`，已落地差异以 README 为准。未做：完整 Terminal Emulator、多用户、云端 Relay、tmux 长任务、Project 聚合。
