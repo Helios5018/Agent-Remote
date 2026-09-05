@@ -144,8 +144,12 @@ export function HomePage({
   const toggle = (key: string) =>
     setPrefs((current) => {
       const next = new Set(current.collapsed);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(key)) {
+        next.delete(key);
+        // 展开 workspace 时直达 surface；pane 自己的折叠按钮仍独立生效。
+        const workspace = tree?.workspaces.find(item => item.id === key);
+        for (const pane of workspace?.panes ?? []) next.delete(pane.id ?? pane.ref);
+      } else next.add(key);
       return { ...current, collapsed: [...next] };
     });
 
