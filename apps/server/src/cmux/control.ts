@@ -65,14 +65,28 @@ export function buildSendKeyArgs(surfaceId: string, key: CmuxKey): string[] {
 }
 
 /**
- * 直接向 PTY 写入输入字节。
+ * Ctrl 组合键对应的 PTY 控制字节。
  *
- * cmux `send-key ctrl+p` 虽然返回成功，但对启用了终端键盘协议的 Pi TUI 实测不会触发
- * 模型切换；`terminal.input` 写入 Ctrl+P 的控制字节（0x10）则与本地按键行为一致。
+ * cmux `send-key ctrl+c` / `ctrl+p` 会返回成功，但对启用了终端键盘协议的
+ * Claude / Codex / Grok / Pi TUI 实测不会触发动作。直接往 PTY 写控制字节
+ * 才和本机按键一致：Ctrl+C = ETX (0x03)，Ctrl+P = DLE (0x10)。
+ */
+export const CONTROL_KEY_BYTES: Partial<Record<CmuxKey, string>> = {
+  "ctrl+c": "\x03",
+  "ctrl+p": "\x10",
+};
+
+/**
+ * 直接向 PTY 写入输入字节。Ctrl 组合键必须走这条路，见 `CONTROL_KEY_BYTES`。
  */
 export function buildTerminalInputArgs(surfaceId: string, text: string): string[] {
   assertSurfaceTarget(surfaceId);
   return ["rpc", "terminal.input", JSON.stringify({ terminal_id: surfaceId, text })];
+}
+
+export function buildKeyDeliveryArgs(surfaceId: string, key: CmuxKey): string[] {
+  const bytes = CONTROL_KEY_BYTES[key];
+  return bytes !== undefined ? buildTerminalInputArgs(surfaceId, bytes) : buildSendKeyArgs(surfaceId, key);
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   buildNewSurfaceArgs,
   buildRenameTabArgs,
   buildRenameWorkspaceArgs,
+  buildKeyDeliveryArgs,
   buildSendKeyArgs,
   buildSendTextArgs,
   buildTerminalInputArgs,
@@ -189,7 +190,19 @@ describe("CmuxCliClient", () => {
     expect(calls.at(-1)).toEqual(["send-key", "--surface", "SURF-11", "--", "enter"]);
   });
 
-  it("Ctrl+P 通过 terminal.input 写入控制字节，可靠触发 Pi 模型切换", async () => {
+  it("Ctrl 组合键通过 terminal.input 写入控制字节，不走 send-key", async () => {
+    expect(buildKeyDeliveryArgs("SURF-11", "enter")).toEqual([
+      "send-key",
+      "--surface",
+      "SURF-11",
+      "--",
+      "enter",
+    ]);
+    expect(buildTerminalInputArgs("SURF-11", "\x03")).toEqual([
+      "rpc",
+      "terminal.input",
+      JSON.stringify({ terminal_id: "SURF-11", text: "\x03" }),
+    ]);
     expect(buildTerminalInputArgs("SURF-PI", "\x10")).toEqual([
       "rpc",
       "terminal.input",
@@ -198,8 +211,14 @@ describe("CmuxCliClient", () => {
 
     const { runner, calls } = makeRunner();
     const client = new CmuxCliClient({ runner });
+    await client.sendKey("SURF-11", "ctrl+c");
     await client.sendKey("SURF-PI", "ctrl+p");
 
+    expect(calls.at(-2)).toEqual([
+      "rpc",
+      "terminal.input",
+      JSON.stringify({ terminal_id: "SURF-11", text: "\x03" }),
+    ]);
     expect(calls.at(-1)).toEqual([
       "rpc",
       "terminal.input",

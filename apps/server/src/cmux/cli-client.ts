@@ -17,9 +17,8 @@ import {
   buildRenameWorkspaceArgs,
   buildReplayArgs,
   buildScrollKeyArgs,
-  buildSendKeyArgs,
+  buildKeyDeliveryArgs,
   buildSendTextArgs,
-  buildTerminalInputArgs,
   TOP_ARGS,
   TREE_ARGS,
 } from "./control.ts";
@@ -231,10 +230,7 @@ export class CmuxCliClient implements CmuxClient {
   }
 
   async sendKey(surfaceId: string, key: CmuxKey): Promise<void> {
-    // Pi 会启用终端键盘协议；cmux 的高级 send-key 路径对 Ctrl+P 返回成功但不会触发动作。
-    // 直接写入对应控制字节可可靠触发 app.model.cycleForward。
-    const args = key === "ctrl+p" ? buildTerminalInputArgs(surfaceId, "\x10") : buildSendKeyArgs(surfaceId, key);
-    const result = await this.runner(args, { timeoutMs: 8000 });
+    const result = await this.runner(buildKeyDeliveryArgs(surfaceId, key), { timeoutMs: 8000 });
     if (result.code !== 0) {
       throw new CmuxError(`发送按键失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", result.stderr.trim());
     }
