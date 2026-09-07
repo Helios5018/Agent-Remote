@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-export function RenameMenu({ value, onRename, maxLength = 80, label = "名称", placeholder, createLabel, onCreate, closeActions }: {
+export function RenameMenu({ value, onRename, maxLength = 80, label = "名称", placeholder, createLabel, onCreate, closeActions, fileAction }: {
+  fileAction?: { label: string; run: () => void };
   closeActions?: { workspace: () => void; pane: () => void };
   createLabel?: string;
   onCreate?: () => Promise<unknown>;
@@ -54,6 +55,7 @@ export function RenameMenu({ value, onRename, maxLength = 80, label = "名称", 
           input.current?.focus();
           input.current?.select();
         }}>重命名</button>
+        {fileAction ? <button type="button" onClick={() => { setOpen(false); fileAction.run(); }}>{fileAction.label}</button> : null}
         {onCreate ? <button type="button" disabled={creating} onClick={async () => {
           if (inFlight.current) return;
           inFlight.current = true;

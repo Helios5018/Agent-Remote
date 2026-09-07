@@ -40,7 +40,7 @@ scripts/           cmux-agent-web-hook + 安装/卸载
 
 ## 约定
 
-- 写操作必须带 `surfaceId`。登录后即可读写，不再分只读 / 控制模式。
+- cmux 控制写操作必须带 `surfaceId`。文件模块使用独立的 `/api/files` 接口，可访问整个 Mac 文件系统，权限由 macOS 当前用户决定，不依赖 surface。登录后即可读写，不再分只读 / 控制模式。
 - 首页可以关掉 surface：走 `cmux close-surface`，必须带 `surfaceId`，关的是 cmux 里的真实 tab。workspace 最后一个 tab 关不掉（cmux `invalid_state`）。
 - 人用短 PIN，Hook 用长密钥且只收本机回环；Hook 任何失败都必须 exit 0。
 - 调 cmux 走参数数组，不经过 shell。SQLite 不存终端全文和 prompt。

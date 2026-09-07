@@ -1,3 +1,5 @@
+import { resolvePaneCwd } from "../cmux/cwd.ts";
+import { FileService } from "../services/files.ts";
 import { Hono } from "hono";
 import { apiError, type AppContext } from "../context.ts";
 import type { Env } from "../security/middleware.ts";
@@ -26,6 +28,18 @@ export function createAgentRoutes(ctx: AppContext) {
     }
 
     return c.json({ agent: updated, snapshot });
+  });
+
+  app.get("/:surfaceId/cwd", async (c) => {
+    const tree = await ctx.client.getTree();
+    for (const workspace of tree.workspaces) for (const pane of workspace.panes) {
+      const surface = pane.surfaces.find((s) => s.id === c.req.param("surfaceId"));
+      if (!surface) continue;
+      const path = await (ctx.paneCwd ?? resolvePaneCwd)({ ...pane, surfaces: [surface] });
+      try { return c.json({ path: path ? await new FileService().directory(path) : null }); }
+      catch { return c.json({ path: null }); }
+    }
+    return c.json({ path: null });
   });
 
   /** 显式标记已读。 */

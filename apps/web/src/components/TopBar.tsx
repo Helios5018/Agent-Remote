@@ -15,7 +15,9 @@ export function TopBar({
   onCreate,
   createLabel,
   closeActions,
+  fileAction,
 }: {
+  fileAction?: { label: string; run: () => void };
   closeActions?: { workspace: () => void; pane: () => void };
   onCreate?: () => Promise<unknown>;
   createLabel?: string;
@@ -46,7 +48,7 @@ export function TopBar({
       </div>
       <div className="topbar-right">{right}
         {onRename ? <RenameMenu value={title} onRename={onRename} maxLength={renameMaxLength}
-          closeActions={closeActions} onCreate={onCreate} createLabel={createLabel} label={renameAriaLabel} placeholder={renamePlaceholder} /> : null}
+          fileAction={fileAction} closeActions={closeActions} onCreate={onCreate} createLabel={createLabel} label={renameAriaLabel} placeholder={renamePlaceholder} /> : null}
       </div>
     </header>
   );

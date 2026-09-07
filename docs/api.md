@@ -75,3 +75,18 @@ WebSocket `/ws`：
 ```
 
 `stage` 为 `text_unknown` 或 `submit_unknown`。成功返回的 `launched` 仅代表启动命令已提交，不是 Agent 进程就绪证明。创建请求整体响应丢失时无法获得可靠的 surfaceId，应检查最新结构树，不能自动重新创建。
+
+## 文件模块
+
+以下接口均需登录，不需要 `surfaceId`，可以访问整台 Mac 的文件系统，读写权限由 macOS 当前用户决定。文件响应不缓存。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/files/roots` | 系统根目录 roots 与当前用户主目录 home |
+| GET | `/api/files/list?path=…&q=…&mode=filter&hidden=0&offset=0` | 每页 100 项；mode 为 filter / name / content；next 为下一页偏移或 null |
+| GET | `/api/files/preview?path=…` | 文本 / 图片 / 其他格式元信息；text 最多 128 KB |
+| GET | `/api/files/download?path=…` | 最大 20 MB，默认附件；inline=1 仅用于受支持的光栅图片 |
+| POST | `/api/files/operation` | JSON 操作，见下方 |
+| GET | `/api/agents/:surfaceId/cwd` | 只提供当前 surface 的可访问工作目录提示，失败返回 path: null |
+
+操作体：`{action:"create",directory,name,kind:"file"|"directory"}`、`{action:"rename",path,name}`、`{action:"copy",paths,directory}`。响应 `{ok:true,paths:[…]}`。同名返回 409，不覆盖；系统拒绝权限时返回 403；不存在返回 404；参数错误返回 400。写请求必须为 JSON，拒绝浏览器跨站提交。搜索的 limited 表示达到扫描时间 / 数量上限；目录可能在分页期间变化，刷新会重新读取。
