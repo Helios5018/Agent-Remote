@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useAppStore } from "../stores/AppStore.tsx";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
 import type { AgentKind, CmuxKey } from "@car/protocol";
 import { DANGEROUS_KEY_HINT, isDangerousKey } from "@car/protocol";
 
@@ -74,11 +75,6 @@ function keyGroupsForAgent(agentKind?: AgentKind | null): KeyButton[][] {
   ];
 }
 
-function describeFailure(caught: unknown): string {
-  const reason = caught instanceof Error ? caught.message : String(caught);
-  return `没发出去：${reason}`;
-}
-
 /** 输入框角上的放大/还原标记，不要做成独立大按钮。 */
 function SizeGlyph({ expanded }: { expanded: boolean }) {
   return (
@@ -100,11 +96,13 @@ function SizeGlyph({ expanded }: { expanded: boolean }) {
 }
 
 export function Composer({
+  surfaceId,
   collapsible = false,
   agentKind,
   onSend,
   onKey,
 }: {
+  surfaceId: string;
   /** 沉浸模式下先收成一条，点开才展开 —— 输入框 + 按键条在手机上要吃掉小半屏。 */
   collapsible?: boolean;
   /** Pi 会额外显示用于快速切换模型的 Ctrl+P。 */
@@ -112,13 +110,15 @@ export function Composer({
   onSend: (text: string, submit: boolean) => Promise<void>;
   onKey: (key: CmuxKey, confirm: boolean) => Promise<void>;
 }) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { drafts } = useAppStore();
+  const subscribeDraft = useCallback((listener: () => void) => drafts.subscribe(surfaceId, listener), [drafts, surfaceId]);
+  const snapshot = useCallback(() => drafts.get(surfaceId), [drafts, surfaceId]);
+  const draft = useSyncExternalStore(subscribeDraft, snapshot, snapshot);
+  const { text, busy, message: failure, uncertain, textWritten } = draft;
+  const setText = (value: string) => drafts.edit(surfaceId, value);
   const [expanded, setExpanded] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [pendingKey, setPendingKey] = useState<CmuxKey | null>(null);
-  // 发送失败的原因就地显示：全局 error 会被紧随其后的刷新请求成功清掉，根本来不及看
-  const [failure, setFailure] = useState<string | null>(null);
   // 中文输入法组字期间不能提交（需求文档 §26 中文输入）
   const [composing, setComposing] = useState(false);
   const keyBarRef = useRef<HTMLDivElement | null>(null);
@@ -188,46 +188,39 @@ export function Composer({
   }, [editorOpen, collapsible, expanded]);
 
   const send = async (submit: boolean) => {
-    if (busy) return;
-    const value = text;
-    if (value.trim().length === 0 && submit === false) return;
-    setBusy(true);
-    setFailure(null);
-    try {
-      await onSend(value, submit);
-      // 只有确认发出去了才清空 —— 失败还清空的话，用户辛苦打的内容就白没了
-      setText("");
-      setEditorOpen(false);
-    } catch (caught) {
-      setFailure(describeFailure(caught));
-    } finally {
-      setBusy(false);
-    }
+    if (busy || uncertain) return;
+    if (text.trim().length === 0 && submit === false) return;
+    if (await drafts.run(surfaceId, () => onSend(text, submit), true)) setEditorOpen(false);
   };
 
   const pressKey = async (key: CmuxKey) => {
-    if (busy) return;
-    // 危险操作二次确认（需求文档 §23.4）
+    if (busy || uncertain) return;
     if (isDangerousKey(key) && pendingKey !== key) {
       setPendingKey(key);
       return;
     }
     setPendingKey(null);
-    setBusy(true);
-    setFailure(null);
-    try {
-      await onKey(key, isDangerousKey(key));
-    } catch (caught) {
-      setFailure(describeFailure(caught));
-    } finally {
-      setBusy(false);
-    }
+    await drafts.run(surfaceId, () => onKey(key, isDangerousKey(key)), false);
   };
+
+  const feedback = failure ? (
+    <div className={`composer-hint${uncertain ? " danger-hint" : ""}`} role="status">
+      {failure}
+      {uncertain ? <div className="composer-recovery-actions">
+        {textWritten ? <button type="button" disabled={busy} onClick={() => {
+          void drafts.run(surfaceId, () => onSend("", true), true, true);
+        }}>已核对，仅补发 Enter</button> : null}
+        {!draft.keyUncertain ? <button type="button" disabled={busy} onClick={() => drafts.resolve(surfaceId, true)}>终端已接收，清除草稿</button> : null}
+        <button type="button" disabled={busy} onClick={() => drafts.resolve(surfaceId, false)}>{draft.keyUncertain ? "已核对，继续操作" : "终端未接收，继续编辑"}</button>
+      </div> : null}
+    </div>
+  ) : null;
 
   if (collapsible && !expanded) {
     const preview = text.trim().length > 0 ? text.trim().replace(/\s+/g, " ").slice(0, 40) : "";
     return (
       <div className="composer composer-collapsed">
+        {feedback}
         <button type="button" className="composer-expand" onClick={() => setExpanded(true)}>
           {preview
             ? `继续编辑：${preview}${text.trim().length > 40 ? "…" : ""}`
@@ -239,7 +232,7 @@ export function Composer({
 
   return (
     <div ref={composerRef} className={`composer${editorOpen ? " composer-editor-open" : ""}`}>
-      {failure ? <div className="composer-hint danger-hint">{failure}</div> : null}
+      {feedback}
       <div className="composer-input-row">
         <div className="composer-input-wrap">
           <textarea
@@ -247,8 +240,9 @@ export function Composer({
             className="composer-input"
             value={text}
             rows={2}
+            maxLength={20000}
             placeholder="输入消息……"
-            disabled={busy}
+            disabled={busy || uncertain}
             onChange={(event) => setText(event.target.value)}
             onPaste={(event) => {
               const pasted = event.clipboardData?.getData("text") ?? "";
@@ -310,7 +304,7 @@ export function Composer({
           <button
             type="button"
             className="send-button"
-            disabled={busy || text.trim().length === 0}
+            disabled={busy || uncertain || text.trim().length === 0}
             onClick={() => void send(true)}
           >
             Send
@@ -336,7 +330,7 @@ export function Composer({
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  disabled={busy}
+                  disabled={busy || uncertain}
                   onClick={() => void pressKey(key)}
                 >
                   {pendingKey === key ? "确认?" : label}

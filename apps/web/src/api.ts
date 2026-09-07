@@ -1,3 +1,4 @@
+import { SurfaceWriteResponseSchema, CreateSurfaceResponseSchema } from "@car/protocol";
 import type {
   AgentDetailResponse,
   AgentKind,
@@ -74,17 +75,24 @@ export const api = {
   grid: (surfaceId: string) => request<SurfaceGrid>(`/api/surfaces/${encodeURIComponent(surfaceId)}/grid`),
 
   /** 在指定 pane 里新建 terminal surface，launch 非 null 时顺手起一个 Agent。 */
-  createSurface: (paneId: string, workspaceId: string | undefined, launch: AgentKind | null) =>
-    request<CreateSurfaceResponse>("/api/surfaces", {
+  createSurface: async (paneId: string, workspaceId: string | undefined, launch: AgentKind | null) => {
+    const result = await request<CreateSurfaceResponse>("/api/surfaces", {
       method: "POST",
       body: JSON.stringify({ paneId, workspaceId, launch }),
-    }),
+    });
+    return CreateSurfaceResponseSchema.parse(result);
+  },
 
-  sendInput: (surfaceId: string, text: string, submit: boolean) =>
-    request<SurfaceWriteResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/input`, {
+  sendInput: async (surfaceId: string, text: string, submit: boolean) => {
+    const result = await request<SurfaceWriteResponse>(`/api/surfaces/${encodeURIComponent(surfaceId)}/input`, {
       method: "POST",
       body: JSON.stringify({ text, submit }),
-    }),
+    });
+    if (!SurfaceWriteResponseSchema.safeParse(result).success) {
+      throw new ApiError(502, "INPUT_DELIVERY_UNKNOWN", "发送响应无效，结果未知");
+    }
+    return result;
+  },
 
   /** 关掉 cmux 里的真实 tab。confirm 必须为 true。 */
   closeSurface: (surfaceId: string) =>

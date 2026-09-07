@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ApiError } from "../../api.ts";
 import { AGENT_DISPLAY_NAME, AGENT_KINDS, type AgentKind, type CmuxPane } from "@car/protocol";
 import { useAppStore } from "../../stores/AppStore.tsx";
 import type { Route } from "../../hooks/useRouter.ts";
@@ -19,14 +20,15 @@ export function NewSurfaceRow({
   pane: CmuxPane;
   navigate: (route: Route) => void;
 }) {
-  const { createSurface } = useAppStore();
+  const { createSurface, refreshTree } = useAppStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   // 失败原因就地显示。顶部的 banner 在长列表里可能已经滚出屏幕，看不见等于没提示。
   const [note, setNote] = useState<string | null>(null);
+  const [uncertain, setUncertain] = useState(false);
 
   const create = async (launch: AgentKind | null) => {
-    if (busy) return;
+    if (busy || uncertain) return;
     setBusy(true);
     setNote(null);
     try {
@@ -35,11 +37,26 @@ export function NewSurfaceRow({
       // 建完直接进会话页：新 tab 在 Mac 上没有被 focus，只能从这里看。
       navigate({ name: "session", surfaceId: result.surfaceId });
     } catch (caught) {
-      setNote(`没建成：${caught instanceof Error ? caught.message : String(caught)}`);
+      const rejected = caught instanceof ApiError && [400, 401, 403, 404, 429].includes(caught.status);
+      setUncertain(!rejected);
+      setNote(rejected
+        ? `未创建：${caught.message}`
+        : "创建结果未知，请刷新结构树检查是否已有新 tab，再决定是否重试。");
+      if (!rejected) void refreshTree();
     } finally {
       setBusy(false);
     }
   };
+
+  if (uncertain) {
+    return <div className="pane-new open">
+      <div className="pane-new-note" role="status">{note}</div>
+      <button type="button" className="pane-new-option" onClick={() => void refreshTree()}>刷新结构树</button>
+      <button type="button" className="pane-new-option" onClick={() => {
+        setUncertain(false); setNote(null);
+      }}>已检查，允许再次新建</button>
+    </div>;
+  }
 
   if (!open) {
     return (
@@ -75,4 +92,3 @@ export function NewSurfaceRow({
     </div>
   );
 }
-

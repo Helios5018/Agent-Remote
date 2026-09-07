@@ -65,6 +65,11 @@ export const CreateSurfaceResponseSchema = z.object({
   /** 服务端替它选的工作目录；反查不到时为 null（cmux 用自己的默认值）。 */
   cwd: z.string().nullable(),
   launched: AgentKindSchema.nullable(),
+  /** tab 已创建，但启动命令未得到完整确认；不可重新创建来重试。 */
+  launchError: z.object({
+    stage: z.enum(["text_unknown", "submit_unknown"]),
+    message: z.string(),
+  }).optional(),
 });
 export type CreateSurfaceResponse = z.infer<typeof CreateSurfaceResponseSchema>;
 

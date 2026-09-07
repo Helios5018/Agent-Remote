@@ -29,6 +29,23 @@
   margin-bottom: 8px;
 }
 
+.composer-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.composer-recovery-actions button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+}
+
 /* 沉浸模式下输入区先收成一条，点开才展开 */
 .composer-collapsed {
   padding: 6px 12px calc(6px + var(--safe-bottom));

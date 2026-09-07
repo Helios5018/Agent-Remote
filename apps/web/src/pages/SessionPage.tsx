@@ -414,18 +414,20 @@ export function SessionPage({
 
       {/*
         发送失败时异常会往上抛给 Composer（它据此保住输入内容并提示原因），
-        顺带跳过 refreshGrid —— 刷新成功会把刚设上的错误又清掉。
+        无论成功失败都刷新画面；反馈保存在会话草稿中，不依赖全局 error。
       */}
       <Composer
+        key={surfaceId}
+        surfaceId={surfaceId}
         collapsible={immersive}
         agentKind={liveAgent?.agent ?? placement?.surface.agent}
         onSend={async (text, submit) => {
-          await sendInput(surfaceId, text, submit);
-          await refreshGrid(surfaceId);
+          try { await sendInput(surfaceId, text, submit); }
+          finally { void refreshGrid(surfaceId); }
         }}
         onKey={async (key, confirm) => {
-          await sendKey(surfaceId, key, confirm);
-          await refreshGrid(surfaceId);
+          try { await sendKey(surfaceId, key, confirm); }
+          finally { void refreshGrid(surfaceId); }
         }}
       />
     </div>

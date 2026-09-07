@@ -52,12 +52,24 @@ export function createSurfaceRoutes(ctx: AppContext) {
         cwd,
       });
 
+      let launchError: CreateSurfaceResponse["launchError"];
       if (launch) {
         // 新 shell 刚被唤醒，还在跑 .zshrc；太早打字有可能被吞掉。
         await sleep(LAUNCH_DELAY_MS);
         // 命令来自服务端白名单，前端只能选 claude/codex/grok/pi。
-        await ctx.client.sendText(surface.surfaceId, ctx.config.launchCommands[launch]);
-        await ctx.client.sendKey(surface.surfaceId, "enter");
+        let textWritten = false;
+        try {
+          await ctx.client.sendText(surface.surfaceId, ctx.config.launchCommands[launch]);
+          textWritten = true;
+          await ctx.client.sendKey(surface.surfaceId, "enter");
+        } catch {
+          launchError = {
+            stage: textWritten ? "submit_unknown" : "text_unknown",
+            message: textWritten
+              ? "tab 已创建，启动命令已写入，但回车结果未知。请打开会话核对；若命令仍在输入行，仅补发 Enter。"
+              : "tab 已创建，启动命令写入结果未知。请打开会话核对后继续启动，不要重复新建。",
+          };
+        }
       }
 
       created = {
@@ -67,7 +79,8 @@ export function createSurfaceRoutes(ctx: AppContext) {
         paneId: surface.paneId ?? found.pane.id,
         workspaceId: surface.workspaceId ?? found.workspaceId,
         cwd: cwd ?? null,
-        launched: launch,
+        launched: launchError ? null : launch,
+        ...(launchError ? { launchError } : {}),
       };
     } catch (error) {
       return handleCmuxError(c, error);
@@ -77,7 +90,7 @@ export function createSurfaceRoutes(ctx: AppContext) {
       at: ctx.now(),
       action: "surface.create",
       surfaceId: created.surfaceId,
-      detail: `pane=${paneId} launch=${launch ?? "none"} cwd=${created.cwd ?? "default"}`,
+      detail: `pane=${paneId} launch=${launch ?? "none"} cwd=${created.cwd ?? "default"}${created.launchError ? ` launchError=${created.launchError.stage}` : ""}`,
     });
     // 新 tab 里可能已经在起 Agent，尽快让它进入轮询和状态推断。
     ctx.poller?.scheduleImmediate(created.surfaceId);
@@ -167,11 +180,25 @@ export function createSurfaceRoutes(ctx: AppContext) {
       return c.json(apiError("BAD_REQUEST", "内容为空"), 400);
     }
 
+    let textWritten = false;
     try {
-      if (text.length > 0) await ctx.client.sendText(surfaceId, text);
+      if (text.length > 0) {
+        await ctx.client.sendText(surfaceId, text);
+        textWritten = true;
+      }
       if (submit) await ctx.client.sendKey(surfaceId, "enter");
     } catch (error) {
-      return handleCmuxError(c, error);
+      if (!textWritten && error instanceof CmuxError && error.code === "SURFACE_NOT_FOUND") {
+        return handleCmuxError(c, error);
+      }
+      // 超时/命令报错可能发生在执行之后，不能声称「没发出去」。
+      const code = textWritten ? "INPUT_TEXT_WRITTEN_SUBMIT_UNKNOWN" : "INPUT_DELIVERY_UNKNOWN";
+      ctx.store.audit({ at: ctx.now(), action: "surface.input_uncertain", surfaceId,
+        detail: `len=${text.length} submit=${submit} stage=${code}` });
+      ctx.poller?.scheduleImmediate(surfaceId);
+      return c.json(apiError(code, textWritten
+        ? "文本已写入，提交结果未知。请先核对终端，避免重复发送正文。"
+        : "发送结果未知。请先核对终端，避免重复输入。"), 500);
     }
 
     ctx.store.audit({

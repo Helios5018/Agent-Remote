@@ -1,3 +1,4 @@
+import { DraftStore } from "./drafts.ts";
 import { SurfaceCache } from "./surface-cache.ts";
 import {
   createContext,
@@ -38,6 +39,7 @@ interface AppStoreValue {
   connection: ConnectionState;
   error: string | null;
   surfaceCache: SurfaceCache;
+  drafts: DraftStore;
 
   login(token: string): Promise<void>;
   logout(): Promise<void>;
@@ -80,6 +82,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [inbox, setInbox] = useState<Inbox | null>(null);
   const [tree, setTree] = useState<CmuxTree | null>(null);
+  const [drafts] = useState(() => new DraftStore());
   const [surfaceCache] = useState(() => new SurfaceCache());
   const requestEpoch = useRef(0);
   const [error, setError] = useState<string | null>(null);
@@ -220,7 +223,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }
   }, [authenticated, surfaceCache]);
 
-  const actions = useMemo<Omit<AppStoreValue, "session" | "loading" | "inbox" | "tree" | "connection" | "error" | "surfaceCache">>(
+  const actions = useMemo<Omit<AppStoreValue, "session" | "loading" | "inbox" | "tree" | "connection" | "error" | "surfaceCache" | "drafts">>(
     () => ({
 
       async login(token: string) {
@@ -231,6 +234,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       async logout() {
         const info = await withError(() => api.logout());
         if (!info) return;
+        drafts.clear();
         setSession(info);
         setInbox(null);
         setTree(null);
@@ -273,6 +277,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         try {
           const result = await api.createSurface(paneId, workspaceId, launch);
           setError(null);
+          if (result.launchError) drafts.notice(result.surfaceId, result.launchError.message);
           // 新 tab 得立刻出现在结构树里，否则跳过去会看到「找不到 surface」。
           await refreshTree();
           return result;
@@ -306,11 +311,11 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
       },
 
       closeWorkspace: (workspaceId, surfaceIds) => write(async () => {
-        try { await api.closeWorkspace(workspaceId, surfaceIds); }
+        try { await api.closeWorkspace(workspaceId, surfaceIds); surfaceIds.forEach(id => drafts.forget(id)); }
         finally { await Promise.all([refreshTree(), refreshInbox()]); }
       }),
       closePane: (workspaceId, paneId, surfaceIds) => write(async () => {
-        try { await api.closePane(workspaceId, paneId, surfaceIds); }
+        try { await api.closePane(workspaceId, paneId, surfaceIds); surfaceIds.forEach(id => drafts.forget(id)); }
         finally { await Promise.all([refreshTree(), refreshInbox()]); }
       }),
 
@@ -342,6 +347,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
           await api.closeSurface(surfaceId);
           setError(null);
           surfaceCache.forget(surfaceId);
+          drafts.forget(surfaceId);
           await Promise.all([refreshTree(), refreshInbox()]);
         } catch (caught) {
           noteApiError(caught);
@@ -362,6 +368,7 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     }),
     [
       surfaceCache,
+      drafts,
       write,
       refreshInbox,
       refreshTree,
@@ -372,8 +379,8 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  const value = useMemo(() => ({ session, loading, inbox, tree, connection, error, surfaceCache, ...actions }),
-    [session, loading, inbox, tree, connection, error, surfaceCache, actions]);
+  const value = useMemo(() => ({ session, loading, inbox, tree, connection, error, surfaceCache, drafts, ...actions }),
+    [session, loading, inbox, tree, connection, error, surfaceCache, drafts, actions]);
 
   return <AppStoreContext.Provider value={value}>{children}</AppStoreContext.Provider>;
 }

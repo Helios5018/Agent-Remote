@@ -37,6 +37,8 @@ export type ApiErrorCode =
   | "TOPOLOGY_CHANGED"
   | "TOO_MANY_ATTEMPTS"
   | "CMUX_UNAVAILABLE"
+  | "INPUT_TEXT_WRITTEN_SUBMIT_UNKNOWN"
+  | "INPUT_DELIVERY_UNKNOWN"
   | "INTERNAL";
 
 export function apiError(code: ApiErrorCode, message: string) {
