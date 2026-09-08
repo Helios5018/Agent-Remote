@@ -1,3 +1,4 @@
+import { FileMutations } from "./file-mutations.ts";
 import { mediaTypes } from "./media.ts";
 import { constants } from "node:fs";
 import { readdir, realpath, lstat, stat, open, mkdir, copyFile, link, unlink, rename } from "node:fs/promises";
@@ -12,6 +13,7 @@ export const imageTypes: Record<string, string> = { ".png": "image/png", ".jpg":
 const PAGE = 100;
 const PREVIEW = 128 * 1024;
 export class FileService {
+  private mutations = new FileMutations();
   private queue: Promise<unknown> = Promise.resolve();
   async roots() { return ["/"]; }
   async path(input: string) { return realpath(resolve(input)); }
@@ -79,8 +81,8 @@ export class FileService {
     }
     return { path, parent: null, entries: entries.slice(offset, offset + PAGE), next: entries.length > offset + PAGE ? offset + PAGE : null, limited };
   }
-  operate(operation: FileOperation) {
-    const task = this.queue.then(() => this.perform(operation));
+  operate(operation: FileOperation, owner = "internal") {
+    const task = this.queue.then(() => this.perform(operation, owner));
     this.queue = task.catch(() => undefined); return task;
   }
   private async absent(path: string) { try { await lstat(path); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return; throw e; } throw new FileError(`已存在同名项目：${basename(path)}。请先重命名后重试`, 409); }
@@ -94,7 +96,10 @@ export class FileService {
       for (const name of await readdir(source)) await this.copy(join(source,name), join(target,name), budget);
     } else await copyFile(source, target, constants.COPYFILE_EXCL);
   }
-  private async perform(op: FileOperation) {
+  private async perform(op: FileOperation, owner: string) {
+    if (op.action === "delete_prepare") return this.mutations.prepare(op.paths, owner, op.mode);
+    if (op.action === "delete") return this.mutations.remove(op.token, owner);
+    if (op.action === "move") return this.mutations.move(op.paths, op.directory, (source, target) => this.copy(source, target, { count: 0, bytes: 0 }));
     if (op.action === "create") {
       const target = join(await this.directory(op.directory), this.name(op.name));
       if (op.kind === "directory") await mkdir(target); else { const f = await open(target, "wx"); await f.close(); }

@@ -84,9 +84,14 @@ WebSocket `/ws`：
 | --- | --- | --- |
 | GET | `/api/files/roots` | 系统根目录 roots 与当前用户主目录 home |
 | GET | `/api/files/list?path=…&q=…&mode=filter&hidden=0&offset=0` | 每页 100 项；mode 为 filter / name / content；next 为下一页偏移或 null |
-| GET | `/api/files/preview?path=…` | 文本 / 图片 / 其他格式元信息；text 最多 128 KB |
+| GET | `/api/files/preview?path=…` | kind 为 text / image / video / audio / other；text 最多 128 KB |
 | GET | `/api/files/download?path=…` | 最大 20 MB，默认附件；inline=1 仅用于受支持的光栅图片 |
+| GET / HEAD | `/api/files/media?path=…` | 鉴权音视频流；支持单段 Range（206）、无效范围返回 416；按 64 KB 分块读取，无 20 MB 播放上限 |
 | POST | `/api/files/operation` | JSON 操作，见下方 |
 | GET | `/api/agents/:surfaceId/cwd` | 只提供当前 surface 的可访问工作目录提示，失败返回 path: null |
 
 操作体：`{action:"create",directory,name,kind:"file"|"directory"}`、`{action:"rename",path,name}`、`{action:"copy",paths,directory}`。响应 `{ok:true,paths:[…]}`。同名返回 409，不覆盖；系统拒绝权限时返回 403；不存在返回 404；参数错误返回 400。写请求必须为 JSON，拒绝浏览器跨站提交。搜索的 limited 表示达到扫描时间 / 数量上限；目录可能在分页期间变化，刷新会重新读取。
+
+剪切粘贴使用 `{action:"move",paths,directory}`，返回 `{ok,paths,failed}`；paths 为已成功移动的源路径，failed 为失败路径及原因。同名目标不会覆盖。跨文件系统移动先复制到目标盘暂存目录，确认源内容未变化后发布并移除源文件。
+
+删除接口分两步且绑定同一个登录 Session（界面中废纸篓仅确认一次并连续调用两步，永久删除保留两次确认）：先提交 `{action:"delete_prepare",paths,mode?:"trash"|"permanent"}` 获得 `{ok:true,paths,token}`，此步骤不删除文件；界面完成对应确认后提交 `{action:"delete",token,confirm:true}`。令牌有效期 2 分钟，仅能使用一次。服务端核验文件及目录内容在确认期间未变化，删除软链接只删除链接本身。mode 默认 permanent 为永久删除；trash 调用 macOS 原生废纸篓接口，模式绑定在确认令牌中，提交时不能切换；系统根目录不能删除。批量删除结果同样包含已成功删除的 paths 和 failed；确认阶段最多检查 10000 个目录项。

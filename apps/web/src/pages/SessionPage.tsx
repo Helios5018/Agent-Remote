@@ -1,3 +1,4 @@
+import { useElementWidth } from "../hooks/useElementWidth.ts";
 import { FileBrowser } from "../features/files/FileBrowser.tsx";
 import { isFilesOpen, saveFilesOpen } from "../features/files/state.ts";
 import { request } from "../api.ts";
@@ -51,8 +52,11 @@ export function SessionPage({
     refreshTree,
     error,
   } = useAppStore();
+  const { ref: pageRef, width: pageWidth } = useElementWidth<HTMLDivElement>();
+  const splitView = pageWidth >= 1200;
   const [filesOpen, setFilesOpen] = useState(() => isFilesOpen(surfaceId));
   const [fileView, setFileView] = useState(false);
+  const terminalVisible = !filesOpen || splitView || !fileView;
   useEffect(() => { setFilesOpen(isFilesOpen(surfaceId)); setFileView(false); }, [surfaceId]);
   const toggleFiles = () => { const next = !filesOpen; setFilesOpen(next); setFileView(next); saveFilesOpen(surfaceId, next); };
   const [agent, setAgent] = useState<AgentState | null>(() => findAgent(inbox, surfaceId) ?? null);
@@ -141,13 +145,13 @@ export function SessionPage({
     element.scrollTop = element.scrollHeight;
   }, [grid?.revision, layout, fontSize, alignNonce]);
 
-  // 文件页会卸载终端滚动容器；切回来时即使网格 revision 不变，也要重新贴底。
+  // 窄屏文件页会隐藏终端；切回来时即使网格 revision 不变，也要重新贴底。
   useLayoutEffect(() => {
-    if (fileView) return;
+    if (!terminalVisible) return;
     pendingAlign.current = null;
     stickToBottom.current = true;
     if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
-  }, [fileView]);
+  }, [terminalVisible]);
 
   // 历史插在网格上方，会把网格整块顶下去；补上同样的高度，视线才不会跳
   useLayoutEffect(() => {
@@ -159,12 +163,12 @@ export function SessionPage({
   }, [history]);
 
   useEffect(() => {
-    if (!fileView || !scrolledAway.current) return;
+    if (terminalVisible || !scrolledAway.current) return;
     scrolledAway.current = false;
     stickToBottom.current = true;
     setHistory(null);
     void actionsRef.current.scrollSurface(surfaceId, "bottom").catch(() => undefined);
-  }, [fileView, surfaceId]);
+  }, [terminalVisible, surfaceId]);
 
   const missingHistory = grid ? gridMissingHistoryRows(grid) : 0;
 
@@ -205,7 +209,7 @@ export function SessionPage({
   // 全屏 TUI 一屏就是全部，浏览器根本没有可滚的区域 —— 滑到边继续滑就翻页
   const { dragOffset, armed } = usePageGesture({
     scrollerRef: outputRef,
-    enabled: grid?.altScreen === true && !fileView,
+    enabled: grid?.altScreen === true && terminalVisible,
     busy: scrollBusy,
     onPage: (direction) => void scrollPage(direction === "up" ? "pageup" : "pagedown"),
   });
@@ -249,8 +253,9 @@ export function SessionPage({
         : "";
 
   return (
-    <div className={`page session-page${immersive && !fileView ? " immersive" : ""}`}>
+    <div ref={pageRef} className={`page session-page${immersive && terminalVisible ? " immersive" : ""}`}>
       <TopBar
+        right={filesOpen && !splitView ? <div className="session-file-tabs" role="tablist" aria-label="详情页模块"><button role="tab" aria-selected={!fileView} onClick={() => setFileView(false)}>会话</button><button role="tab" aria-selected={fileView} onClick={() => setFileView(true)}>文件</button></div> : undefined}
         fileAction={{ label: filesOpen ? "关闭文件系统" : "打开文件系统", run: toggleFiles }}
         title={title}
         onBack={back}
@@ -264,8 +269,8 @@ export function SessionPage({
         renameAriaLabel="Surface 名称"
       />
 
-      {filesOpen && <div className="session-file-tabs" role="tablist" aria-label="详情页模块"><button role="tab" aria-selected={!fileView} onClick={() => setFileView(false)}>会话</button><button role="tab" aria-selected={fileView} onClick={() => setFileView(true)}>文件</button></div>}
-      {filesOpen && fileView ? <FileBrowser onClose={toggleFiles} workDirectory={async () => (await request<{ path: string | null }>(`/api/agents/${encodeURIComponent(surfaceId)}/cwd`)).path} /> : <>
+      <div className={`session-content${filesOpen && splitView ? " split-view" : ""}`}>
+      <div className="session-terminal" hidden={!terminalVisible}>
       <div className="session-header">
         <div className="session-agent">{kindLabel}</div>
         {liveAgent ? <StatusBadge status={liveAgent.status} /> : null}
@@ -456,7 +461,9 @@ export function SessionPage({
           finally { void refreshGrid(surfaceId); }
         }}
       />
-      </>}
+      </div>
+      {filesOpen && (splitView || fileView) && <FileBrowser onClose={toggleFiles} workDirectory={async () => (await request<{ path: string | null }>(`/api/agents/${encodeURIComponent(surfaceId)}/cwd`)).path} />}
+      </div>
     </div>
   );
 }

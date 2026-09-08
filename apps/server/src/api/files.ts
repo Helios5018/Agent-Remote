@@ -50,7 +50,7 @@ export function createFileRoutes(ctx: AppContext) {
   app.post("/operation", async (c) => {
     const body = FileOperationSchema.safeParse(await safeJson(c.req.raw));
     if (!body.success) throw new FileError("无效文件操作");
-    return c.json(await files.operate(body.data));
+    return c.json(await files.operate(body.data, c.get("session").id));
   });
   return app;
 }

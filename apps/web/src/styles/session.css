@@ -134,3 +134,9 @@
   height: 1px;
   background: var(--border);
 }
+
+.session-content { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.session-terminal { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; position: relative; }
+.session-terminal[hidden] { display: none; }
+.session-content.split-view > .session-terminal { flex: 0 0 48%; border-right: 1px solid var(--border); }
+.session-content.split-view > .file-browser { flex: 1; min-width: 0; }
