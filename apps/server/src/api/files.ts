@@ -1,3 +1,4 @@
+import { saveUpload } from "../services/uploads.ts";
 import { mediaResponse } from "../services/media.ts";
 import { homedir } from "node:os";
 import { Hono } from "hono";
@@ -14,7 +15,12 @@ export function createFileRoutes(ctx: AppContext) {
   const files = new FileService();
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store");
-    if (c.req.method !== "GET" && c.req.method !== "HEAD" && (!c.req.header("content-type")?.startsWith("application/json") || c.req.header("sec-fetch-site") === "cross-site")) return c.json(apiError("BAD_REQUEST", "请从本站提交文件操作"), 403);
+    const upload = c.req.path.endsWith("/upload");
+    const contentType = c.req.header("content-type") ?? "";
+    const validType = upload ? contentType === "application/octet-stream" : contentType.startsWith("application/json");
+    if (c.req.method !== "GET" && c.req.method !== "HEAD" && (!validType || c.req.header("sec-fetch-site") === "cross-site")) {
+      return c.json(apiError("BAD_REQUEST", "请从本站提交文件操作"), 403);
+    }
     await next();
   });
   app.onError((error, c) => {
@@ -22,6 +28,7 @@ export function createFileRoutes(ctx: AppContext) {
     const status = error instanceof FileError ? error.status : code === "ENOENT" ? 404 : code === "EEXIST" ? 409 : code === "EACCES" || code === "EPERM" ? 403 : 400;
     return c.json(apiError("BAD_REQUEST", error instanceof FileError ? error.message : code === "ENOENT" ? "文件或目录已不存在" : code === "EEXIST" ? "已存在同名项目，请换一个名称" : "无法操作该路径，请检查权限和文件状态"), status);
   });
+  app.post("/upload", async (c) => c.json(await saveUpload(ctx.config.dataDir, c.req.raw), 201));
   app.get("/roots", async (c) => c.json({ roots: await files.roots(), home: homedir() }));
   app.get("/list", async (c) => {
     const offset = Number(c.req.query("offset") ?? 0);

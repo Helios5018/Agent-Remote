@@ -1,3 +1,8 @@
+import { InlineEditor, type InlineEditorHandle } from "../features/attachments/InlineEditor.tsx";
+import { AttachmentControls, ReferenceDetails } from "../features/attachments/AttachmentControls.tsx";
+import { referenceForPath, type InputNode, type FileReference } from "../features/attachments/model.ts";
+import { uploadReference } from "../features/attachments/upload.ts";
+import "../features/attachments/attachments.css";
 import { useAppStore } from "../stores/AppStore.tsx";
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useSyncExternalStore } from "react";
 import type { AgentKind, CmuxKey } from "@car/protocol";
@@ -115,15 +120,38 @@ export function Composer({
   const snapshot = useCallback(() => drafts.get(surfaceId), [drafts, surfaceId]);
   const draft = useSyncExternalStore(subscribeDraft, snapshot, snapshot);
   const { text, busy, message: failure, uncertain, textWritten } = draft;
-  const setText = (value: string) => drafts.edit(surfaceId, value);
+  const nodes: InputNode[] = draft.nodes ?? (text ? [{ type: "text", text }] : []);
+  const blockedFiles = nodes.some(n => n.type === "file" && n.status !== "ready");
+  const tooLong = text.length > 20000;
+  const [selectedReference, setSelectedReference] = useState<string | null>(null);
+  const reference = nodes.find((n): n is FileReference => n.type === "file" && n.id === selectedReference);
+  const insertNodes = (inserted: InputNode[]) => {
+    if (busy || uncertain) return;
+    if (textareaRef.current) textareaRef.current.insert(inserted);
+    else { drafts.editNodes(surfaceId, [...nodes, ...inserted]); setExpanded(true); }
+  };
+  const insertPaths = (paths: string[]) => insertNodes(paths.flatMap(path => [referenceForPath(path), { type: "text" as const, text: " " }]));
+  const uploadFiles = (files: File[]) => {
+    if (busy || uncertain) return;
+    const refs: FileReference[] = files.map(file => ({ type: "file", id: crypto.randomUUID(), name: file.name, size: file.size, file, status: "uploading", progress: 0 }));
+    insertNodes(refs.flatMap(ref => [ref, { type: "text" as const, text: " " }]));
+    refs.forEach(ref => uploadReference(drafts, surfaceId, ref));
+  };
+  useEffect(() => {
+    const insert = (event: Event) => {
+      const detail = (event as CustomEvent<{ surfaceId: string; paths: string[] }>).detail;
+      if (detail.surfaceId === surfaceId && !busy && !uncertain) { insertPaths(detail.paths); event.preventDefault(); requestAnimationFrame(() => textareaRef.current?.focus()); }
+    };
+    window.addEventListener("car:insert-files", insert);
+    return () => window.removeEventListener("car:insert-files", insert);
+  });
   const [expanded, setExpanded] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [pendingKey, setPendingKey] = useState<CmuxKey | null>(null);
   // 中文输入法组字期间不能提交（需求文档 §26 中文输入）
-  const [composing, setComposing] = useState(false);
   const keyBarRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const textareaRef = useRef<InlineEditorHandle | null>(null);
   // 两端是否还有没滑到的键，用来决定要不要显示渐隐提示
   const [edges, setEdges] = useState({ start: false, end: false });
 
@@ -142,7 +170,7 @@ export function Composer({
   }, []);
 
   const syncTextareaHeight = () => {
-    const element = textareaRef.current;
+    const element = textareaRef.current?.element();
     if (!element) return;
     if (editorOpen) {
       element.style.height = "";
@@ -188,13 +216,13 @@ export function Composer({
   }, [editorOpen, collapsible, expanded]);
 
   const send = async (submit: boolean) => {
-    if (busy || uncertain) return;
+    if (busy || uncertain || blockedFiles || tooLong) return;
     if (text.trim().length === 0 && submit === false) return;
     if (await drafts.run(surfaceId, () => onSend(text, submit), true)) setEditorOpen(false);
   };
 
   const pressKey = async (key: CmuxKey) => {
-    if (busy || uncertain) return;
+    if (busy || uncertain || blockedFiles) return;
     if (isDangerousKey(key) && pendingKey !== key) {
       setPendingKey(key);
       return;
@@ -233,38 +261,24 @@ export function Composer({
   return (
     <div ref={composerRef} className={`composer${editorOpen ? " composer-editor-open" : ""}`}>
       {feedback}
+      {blockedFiles && <div className="composer-hint" role="status">附件上传完成后可发送；失败的附件可点击重试或移除。</div>}
+      {tooLong && <div className="composer-hint danger-hint" role="alert">展开路径后的消息超过 20000 字符，请缩短后发送。</div>}
       <div className="composer-input-row">
         <div className="composer-input-wrap">
-          <textarea
-            ref={textareaRef}
-            className="composer-input"
-            value={text}
-            rows={2}
-            maxLength={20000}
-            placeholder="输入消息……"
-            disabled={busy || uncertain}
-            onChange={(event) => setText(event.target.value)}
-            onPaste={(event) => {
-              const pasted = event.clipboardData?.getData("text") ?? "";
-              const target = event.currentTarget;
-              const next = applyPaste(text, pasted, target.selectionStart ?? text.length, target.selectionEnd ?? text.length);
-              if (shouldExpandEditorForText(next)) setEditorOpen(true);
-            }}
-            onCompositionStart={() => setComposing(true)}
-            onCompositionEnd={() => setComposing(false)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !composing) {
-                event.preventDefault();
-                void send(true);
-                return;
+          <InlineEditor ref={textareaRef} nodes={nodes} disabled={busy || uncertain}
+            onChange={value => drafts.editNodes(surfaceId, value)} onFiles={uploadFiles} onPaths={insertPaths}
+            onReference={ref => setSelectedReference(ref.id)}
+            onLongPaste={value => { if (shouldExpandEditorForText(value)) setEditorOpen(true); }}
+            onKeyDown={event => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+                event.preventDefault(); void send(true);
               }
-              if (event.key === "Escape" && editorOpen && !composing) {
-                event.preventDefault();
-                setEditorOpen(false);
-              }
+              if (event.key === "Escape" && editorOpen) { event.preventDefault(); setEditorOpen(false); }
             }}
           />
-          <div className="composer-input-tools">
+          <div className="composer-actions">
+            <AttachmentControls surfaceId={surfaceId} disabled={busy || uncertain} onFiles={uploadFiles} onPaths={insertPaths} />
+            <div className="composer-action-spacer" />
             <button
               type="button"
               className="composer-size-toggle"
@@ -275,43 +289,21 @@ export function Composer({
             >
               <SizeGlyph expanded={editorOpen} />
             </button>
-            {collapsible ? (
-              <button
-                type="button"
-                className="composer-collapse"
-                onClick={() => {
-                  setEditorOpen(false);
-                  setExpanded(false);
-                }}
-                title="收起输入区，保留草稿"
-                aria-label="收起输入区"
-              >
-                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-                  <path
-                    d="m4 6 4 4 4-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            ) : null}
-          </div>
-        </div>
-        <div className="composer-actions">
+
           <button
             type="button"
             className="send-button"
-            disabled={busy || uncertain || text.trim().length === 0}
+            disabled={busy || uncertain || blockedFiles || tooLong || text.trim().length === 0}
             onClick={() => void send(true)}
           >
-            Send
+            <span>发送</span>
+            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 12V4m-4 4 4-4 4 4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
+          </div>
         </div>
       </div>
 
+      <div className="composer-footer">
       <div
         className={`key-bar-wrap ${edges.start ? "fade-start" : ""} ${edges.end ? "fade-end" : ""}`}
       >
@@ -330,7 +322,7 @@ export function Composer({
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  disabled={busy || uncertain}
+                  disabled={busy || uncertain || blockedFiles}
                   onClick={() => void pressKey(key)}
                 >
                   {pendingKey === key ? "确认?" : label}
@@ -340,6 +332,34 @@ export function Composer({
           ))}
         </div>
       </div>
+            {collapsible ? (
+              <button
+                type="button"
+                className="composer-collapse"
+                onClick={() => {
+                  setEditorOpen(false);
+                  setExpanded(false);
+                }}
+                title="收起输入区，保留草稿"
+                aria-label="收起输入区"
+              >
+                <span>收起</span>
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                  <path
+                    d="m4 6 4 4 4-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            ) : null}
+      </div>
+      {reference && <ReferenceDetails reference={reference} disabled={busy || uncertain} onClose={() => setSelectedReference(null)}
+        onRemove={() => { drafts.editNodes(surfaceId, nodes.filter(n => n.type !== "file" || n.id !== reference.id)); setSelectedReference(null); textareaRef.current?.focus(); }}
+        onRetry={() => uploadReference(drafts, surfaceId, reference)} />}
       {pendingKey ? (
         <div className="composer-hint danger-hint">
           {DANGEROUS_KEY_HINT[pendingKey] ?? "危险操作"}。再点一次「确认?」发送 {pendingKey}，或

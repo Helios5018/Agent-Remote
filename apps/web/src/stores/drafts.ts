@@ -1,7 +1,9 @@
+import { nodesText, type InputNode, type FileReference } from "../features/attachments/model.ts";
 import { ApiError } from "../api.ts";
 
 export interface Draft {
   text: string;
+  nodes?: InputNode[];
   busy: boolean;
   message: string | null;
   uncertain: boolean;
@@ -40,11 +42,21 @@ export class DraftStore {
   }
   edit(id: string, text: string): void {
     const current = this.get(id);
-    if (!current.busy && !current.uncertain) this.put(id, { ...current, text, message: null });
+    if (!current.busy && !current.uncertain) this.put(id, { ...current, text, nodes: undefined, message: null });
+  }
+  editNodes(id: string, nodes: InputNode[]): void {
+    const current = this.get(id);
+    if (!current.busy && !current.uncertain) this.put(id, { ...current, nodes, text: nodesText(nodes), message: null });
+  }
+  updateFile(id: string, fileId: string, patch: Partial<FileReference>): void {
+    const current = this.get(id);
+    if (!current.nodes?.some(n => n.type === "file" && n.id === fileId)) return;
+    const nodes = current.nodes.map(n => n.type === "file" && n.id === fileId ? { ...n, ...patch } : n);
+    this.put(id, { ...current, nodes, text: nodesText(nodes) });
   }
   resolve(id: string, clear: boolean): void {
     const current = this.get(id);
-    if (!current.busy) this.put(id, { ...EMPTY, text: clear ? "" : current.text });
+    if (!current.busy) this.put(id, { ...EMPTY, text: clear ? "" : current.text, nodes: clear ? undefined : current.nodes });
   }
   notice(id: string, message: string): void {
     this.put(id, { ...this.get(id), message });
@@ -58,7 +70,7 @@ export class DraftStore {
       await operation();
       // 登出/关闭会话后忽略迟到响应，不能重新建立已清除的草稿。
       if (this.values.get(id) !== pending) return false;
-      this.put(id, { ...EMPTY, text: clearOnSuccess ? "" : current.text,
+      this.put(id, { ...EMPTY, text: clearOnSuccess ? "" : current.text, nodes: clearOnSuccess ? undefined : current.nodes,
         message: clearOnSuccess ? "已发送到终端" : "按键已发送到终端" });
       return true;
     } catch (error) {

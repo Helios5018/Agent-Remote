@@ -14,7 +14,7 @@ function Router() {
 
   switch (route.name) {
     case "session":
-      return <SessionPage surfaceId={route.surfaceId} back={back} navigate={navigate} />;
+      return <SessionPage key={route.surfaceId} surfaceId={route.surfaceId} back={back} navigate={navigate} />;
     case "workspace":
       // #/w/all 是旧链接，等价于首页的完整结构树。
       return route.workspaceId === "all" ? (

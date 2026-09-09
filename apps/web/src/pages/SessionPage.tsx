@@ -1,6 +1,6 @@
 import { useElementWidth } from "../hooks/useElementWidth.ts";
 import { FileBrowser } from "../features/files/FileBrowser.tsx";
-import { isFilesOpen, saveFilesOpen } from "../features/files/state.ts";
+import { isFilesOpen, saveFilesOpen, resetFiles } from "../features/files/state.ts";
 import { request } from "../api.ts";
 import { alignAfterScroll, type ScrollAlign } from "../features/session/scroll.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -56,9 +56,14 @@ export function SessionPage({
   const splitView = pageWidth >= 1200;
   const [filesOpen, setFilesOpen] = useState(() => isFilesOpen(surfaceId));
   const [fileView, setFileView] = useState(false);
+  useEffect(() => {
+    const inserted = (event: Event) => { if ((event as CustomEvent<{ surfaceId: string }>).detail.surfaceId === surfaceId) queueMicrotask(() => { if (event.defaultPrevented) setFileView(false); }); };
+    window.addEventListener("car:insert-files", inserted);
+    return () => window.removeEventListener("car:insert-files", inserted);
+  }, [surfaceId]);
   const terminalVisible = !filesOpen || splitView || !fileView;
   useEffect(() => { setFilesOpen(isFilesOpen(surfaceId)); setFileView(false); }, [surfaceId]);
-  const toggleFiles = () => { const next = !filesOpen; setFilesOpen(next); setFileView(next); saveFilesOpen(surfaceId, next); };
+  const toggleFiles = () => { const next = !filesOpen; if (!next) resetFiles(surfaceId); setFilesOpen(next); setFileView(next); saveFilesOpen(surfaceId, next); };
   const [agent, setAgent] = useState<AgentState | null>(() => findAgent(inbox, surfaceId) ?? null);
   const [now, setNow] = useState(() => Date.now());
   const [layoutPref, setLayoutPref] = useState<GridLayout | "auto">(readLayoutPref);
@@ -462,7 +467,7 @@ export function SessionPage({
         }}
       />
       </div>
-      {filesOpen && (splitView || fileView) && <FileBrowser onClose={toggleFiles} workDirectory={async () => (await request<{ path: string | null }>(`/api/agents/${encodeURIComponent(surfaceId)}/cwd`)).path} />}
+      {filesOpen && (splitView || fileView) && <FileBrowser key={surfaceId} scopeId={surfaceId} onClose={toggleFiles} workDirectory={async () => (await request<{ path: string | null }>(`/api/agents/${encodeURIComponent(surfaceId)}/cwd`)).path} />}
       </div>
     </div>
   );

@@ -116,6 +116,7 @@ async function main(): Promise<void> {
     hostname: config.host,
     port: config.port,
     idleTimeout: 120,
+    maxRequestBodySize: 512 * 1024 * 1024,
     websocket,
     fetch: async (request: Request, srv: BunServer) => {
       const url = new URL(request.url);

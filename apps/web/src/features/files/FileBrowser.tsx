@@ -1,3 +1,4 @@
+import { FileEntryContent, formatFileSize as size } from "./FileEntryContent.tsx";
 import { useDesktopInput } from "../../hooks/useDesktopInput.ts";
 import { useElementWidth } from "../../hooks/useElementWidth.ts";
 import { ParentDirectory } from "./ParentDirectory.tsx";
@@ -7,18 +8,17 @@ import { PathBreadcrumbs } from "./PathBreadcrumbs.tsx";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { FileEntry, FileListing, FileOperation, FilePreview, FileMutationResult } from "@car/protocol";
 import { request } from "../../api.ts";
-import { addTab, getFiles, patchTab, setFiles, useFiles } from "./state.ts";
+import { useFiles } from "./state.ts";
 import "./files.css";
 const leaf = (path: string) => path.split("/").filter(Boolean).pop() || "/";
-const size = (n: number) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n/1024).toFixed(1)} KB` : `${(n/1048576).toFixed(1)} MB`;
-export function FileBrowser({ onClose, workDirectory }: { onClose: () => void; workDirectory?: () => Promise<string | null> }) {
+export function FileBrowser({ scopeId, onClose, workDirectory, onInsert }: { scopeId: string; onInsert?: (paths: string[]) => void; onClose: () => void; workDirectory?: () => Promise<string | null> }) {
   const { ref: browserRef, width: browserWidth } = useElementWidth<HTMLElement>();
   const desktopInput = useDesktopInput();
   const [shortcutHelp, setShortcutHelp] = useState(false);
   const visual = useRef<{ anchor: string; base: string[]; unset: boolean } | null>(null);
   const parentPath = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
   const threeColumns = browserWidth >= 900;
-  const state = useFiles(); const tab = state.tabs.find((t) => t.id === state.active);
+  const { state, getFiles, setFiles, patchTab, addTab } = useFiles(scopeId); const tab = state.tabs.find((t) => t.id === state.active);
   const [roots, setRoots] = useState<string[]>([]);
   const [listing, setListing] = useState<FileListing | null>(null);
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
@@ -30,7 +30,7 @@ export function FileBrowser({ onClose, workDirectory }: { onClose: () => void; w
   const [home, setHome] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [selecting, setSelecting] = useState(false);
-  const selectionMode = selecting || !!tab?.selected.length;
+  const selectionMode = !!onInsert || selecting || !!tab?.selected.length;
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!menu) return;
@@ -50,7 +50,7 @@ export function FileBrowser({ onClose, workDirectory }: { onClose: () => void; w
   const touch = useRef<{ x: number; y: number }>(); const longPress = useRef<ReturnType<typeof setTimeout>>(); const held = useRef(false);
   useEffect(() => { const abort = new AbortController(); request<{ roots: string[]; home?: string }>("/api/files/roots", { signal: abort.signal }).then((r) => {
     setHome(r.home ?? ""); setRoots(r.roots); if (!getFiles().tabs.length && r.roots[0]) {
-      if (workDirectory) void workDirectory().then((p) => { if (!getFiles().tabs.length) addTab(p ?? (r.home || r.roots[0]!)); }).catch(() => { if (!getFiles().tabs.length) addTab((r.home || r.roots[0]!)); });
+      if (workDirectory) void workDirectory().then((p) => { if (!abort.signal.aborted && !getFiles().tabs.length) addTab(p ?? (r.home || r.roots[0]!)); }).catch(() => { if (!abort.signal.aborted && !getFiles().tabs.length) addTab((r.home || r.roots[0]!)); });
       else addTab(r.home || r.roots[0]);
     }
   }).catch((e) => { if (!abort.signal.aborted) setError(e.message); }); return () => { abort.abort(); requestRef.current?.abort(); previewRequest.current?.abort(); clearTimeout(longPress.current); }; }, []);
@@ -95,7 +95,7 @@ export function FileBrowser({ onClose, workDirectory }: { onClose: () => void; w
   const toggle = (path: string) => { if (tab) patchTab(tab.id, { selected: tab.selected.includes(path) ? tab.selected.filter((p) => p !== path) : [...tab.selected, path] }); };
   const showPreview = async (entry: FileEntry) => {
     if (held.current) { held.current = false; return; }
-    if (selectionMode) { toggle(entry.path); return; }
+    if (selectionMode && !onInsert) { toggle(entry.path); return; }
     if (entry.kind === "directory") { navigate(entry.path); return; }
     if (threeColumns) {
       if (!listing?.entries.some((e) => e.path === entry.path)) navigate(entry.path.slice(0, entry.path.lastIndexOf("/")) || "/");
@@ -134,6 +134,15 @@ export function FileBrowser({ onClose, workDirectory }: { onClose: () => void; w
   const copyPath = async (paths: string[]) => { try { await navigator.clipboard.writeText(paths.join("\n")); setError(""); setNotice("路径已复制"); } catch { setError(`浏览器未允许复制，路径：${paths.join("、")}`); } };
   const switchTab = (direction: number) => { const i = state.tabs.findIndex((t) => t.id === state.active); const next = state.tabs[i + direction]; if (next) setFiles({ ...getFiles(), active: next.id }); };
   const targets = () => tab?.selected.length ? tab.selected : focusedEntry ? [focusedEntry.path] : [];
+  const insertPaths = (paths: string[]) => {
+    if (onInsert) onInsert(paths);
+    else {
+      const event = new CustomEvent("car:insert-files", { cancelable: true, detail: { surfaceId: scopeId, paths } });
+      window.dispatchEvent(event);
+      if (!event.defaultPrevented) { setError("当前输入暂不可编辑，请先回到会话核对发送状态"); return; }
+    }
+    setNotice("已插入当前会话输入框");
+  };
   const yank = (mode: "copy" | "move") => {
     const paths = targets(); if (!paths.length || !tab) return;
     setFiles({ ...getFiles(), clipboard: paths, clipboardMode: mode });
@@ -223,38 +232,44 @@ export function FileBrowser({ onClose, workDirectory }: { onClose: () => void; w
     </div>}
     {error && <div className="file-message error" role="alert">{error}</div>}{notice && <div className="file-toast" role="status">{notice}</div>}
     <div className={`file-body${preview ? " has-preview" : ""}`}>
-      {threeColumns && <ParentDirectory path={tab?.path && tab.path !== "/" ? tab.path.slice(0, tab.path.lastIndexOf("/")) || "/" : null} current={tab?.path ?? ""} hidden={tab?.hidden ?? true} onNavigate={() => tab && navigate(parentPath(tab.path))} onOpen={(entry) => { if (tab) { navigate(parentPath(tab.path)); setFocusedPath(entry.path); } }} />}
+      {threeColumns && <ParentDirectory path={tab?.path && tab.path !== "/" ? tab.path.slice(0, tab.path.lastIndexOf("/")) || "/" : null} current={tab?.path ?? ""} hidden={tab?.hidden ?? true} onPromote={() => tab && navigate(parentPath(tab.path))} onNavigate={() => tab && navigate(parentPath(tab.path))} onOpen={(entry) => { if (tab) { navigate(parentPath(tab.path)); setFocusedPath(entry.path); } }} />}
       <div className="file-list" ref={listRef} onScroll={(e) => { if (tab) patchTab(tab.id, { scroll: e.currentTarget.scrollTop }); }}
         onTouchStart={(e) => { const p = e.touches[0]; if (p) touch.current = { x: p.clientX, y: p.clientY }; }}
         onTouchMove={(e) => { const p = e.touches[0]; if (p && touch.current && Math.hypot(p.clientX-touch.current.x, p.clientY-touch.current.y) > 10) clearTimeout(longPress.current); }}
         onTouchEnd={(e) => { clearTimeout(longPress.current); const p = e.changedTouches[0]; if (touch.current && p) { const dx = p.clientX-touch.current.x; const dy = p.clientY-touch.current.y; if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy)*2) switchTab(dx > 0 ? -1 : 1); } touch.current = undefined; }}>
         {threeColumns && <div className="file-column-heading">当前目录</div>}
         {listing?.entries.map((entry) => <div className={`file-row${desktopInput && focusedEntry?.path === entry.path ? " focused" : ""}${tab?.selected.includes(entry.path) ? " selected" : ""}${state.clipboardMode === "move" && state.clipboard.includes(entry.path) ? " cut" : ""}`} key={entry.path}>
-          {selectionMode && <input type="checkbox" aria-label={`选择 ${entry.name}`} checked={tab?.selected.includes(entry.path) ?? false} onChange={() => toggle(entry.path)} />}
-          <button className="file-entry" tabIndex={desktopInput ? (focusedEntry?.path === entry.path ? 0 : -1) : 0}
+          {selectionMode && (!onInsert || entry.kind === "file") && <input type="checkbox" aria-label={`选择 ${entry.name}`} checked={tab?.selected.includes(entry.path) ?? false} onChange={() => toggle(entry.path)} />}
+          <button className="file-entry" draggable={entry.kind === "file"} onDragStart={event => {
+            const paths = tab?.selected.includes(entry.path) ? tab.selected : [entry.path];
+            event.dataTransfer.setData("application/x-car-files", JSON.stringify(paths));
+            event.dataTransfer.setData("text/plain", paths.join("\n"));
+            event.dataTransfer.effectAllowed = "copy";
+          }} tabIndex={desktopInput ? (focusedEntry?.path === entry.path ? 0 : -1) : 0}
             onPointerEnter={(e) => { if (threeColumns && e.pointerType === "mouse") setFocusedPath(entry.path); }}
             onFocus={() => { if (desktopInput) setFocusedPath(entry.path); }}
  onClick={() => {
               if (held.current) { held.current = false; return; }
-              if (selectionMode) { toggle(entry.path); return; }
+              if (selectionMode && !onInsert) { toggle(entry.path); return; }
               setFocusedPath(entry.path);
               if (!threeColumns) void showPreview(entry);
             }} onContextMenu={(e) => { e.preventDefault(); toggle(entry.path); }}
             onPointerDown={(e) => { held.current = false; if (e.pointerType === "touch") longPress.current = setTimeout(() => { held.current = true; toggle(entry.path); }, 500); }} onPointerUp={() => clearTimeout(longPress.current)} onPointerCancel={() => clearTimeout(longPress.current)}>
-            <span className="file-kind">{entry.kind === "directory" ? "▣" : entry.kind === "link" ? "↗" : "▤"}</span><span className="file-name">{entry.name}<small>{entry.excerpt ? `L${entry.line} · ${entry.excerpt}` : tab?.mode !== "filter" && tab?.query ? entry.path : entry.kind === "directory" ? "文件夹" : `${size(entry.size)} · ${new Date(entry.modified).toLocaleDateString()}`}</small></span>
+            <FileEntryContent entry={entry} detail={entry.excerpt ? `L${entry.line} · ${entry.excerpt}` : tab?.mode !== "filter" && tab?.query ? entry.path : undefined} />
           </button>
         </div>)}
         {busy && <p className="file-empty">正在查找…</p>}{!busy && listing && !listing.entries.length && <p className="file-empty">{tab?.query ? "没有匹配的文件" : "这个文件夹是空的"}</p>}
         {listing?.limited && <p className="file-empty">搜索达到时间或数量上限，请进入更具体的目录继续查找。内容搜索仅检查 128 KB 以内的文本，跳过 .git 和 node_modules。</p>}
         {listing?.next !== null && listing?.next !== undefined && <button className="file-more" disabled={busy} onClick={() => void load(true)}>加载更多文件</button>}
       </div>
-      {threeColumns && focusedEntry?.kind === "directory" && <ParentDirectory key={focusedEntry.path} path={focusedEntry.path} current="" hidden={tab?.hidden ?? true} title={focusedEntry.name} className="file-child file-preview" onNavigate={navigate} onOpen={(entry) => { navigate(focusedEntry.path); setFocusedPath(entry.path); }} />}
+      {threeColumns && focusedEntry?.kind === "directory" && <ParentDirectory key={focusedEntry.path} path={focusedEntry.path} current="" hidden={tab?.hidden ?? true} title={focusedEntry.name} className="file-child file-preview" onPromote={() => navigate(focusedEntry.path)} onNavigate={navigate} onOpen={(entry) => { navigate(focusedEntry.path); setFocusedPath(entry.path); }} />}
       {threeColumns && focusedEntry?.kind !== "directory" && !preview && <aside className="file-preview file-preview-placeholder" aria-label="文件预览"><div className="file-column-heading">{focusedEntry?.name ?? "当前项"}</div><p className="file-empty">{focusedEntry ? "正在读取…" : "这个文件夹是空的"}</p></aside>}
-      {preview && (!threeColumns || focusedEntry?.kind !== "directory") && <aside className="file-preview" aria-label="文件预览"><div className="file-preview-header"><strong>{preview.name}</strong>{!threeColumns && <button aria-label="关闭预览" onClick={() => { setPreview(null); if (desktopInput) browserRef.current?.focus(); }}>×</button>}</div><div className="file-actions"><span>{size(preview.size)}</span><button onClick={() => void copyPath([preview.path])}>复制路径</button>{preview.size <= 20*1024*1024 && <a href={`/api/files/download?${new URLSearchParams({ path: preview.path })}`} download={preview.name}>下载</a>}</div>
+      {preview && (!threeColumns || focusedEntry?.kind !== "directory") && <aside className="file-preview" aria-label="文件预览"><div className="file-preview-header"><strong>{preview.name}</strong>{!threeColumns && <button aria-label="关闭预览" onClick={() => { setPreview(null); if (desktopInput) browserRef.current?.focus(); }}>×</button>}</div><div className="file-actions"><span>{size(preview.size)}</span><button onClick={() => insertPaths([preview.path])}>插入当前会话</button><button onClick={() => void copyPath([preview.path])}>复制路径</button>{preview.size <= 20*1024*1024 && <a href={`/api/files/download?${new URLSearchParams({ path: preview.path })}`} download={preview.name}>下载</a>}</div>
         {preview.kind === "video" || preview.kind === "audio" ? <MediaPreview key={preview.path} preview={preview} /> : preview.kind === "image" ? <img alt={preview.name} src={`/api/files/download?${new URLSearchParams({ path: preview.path, inline: "1" })}`} /> : preview.kind === "text" ? <pre>{preview.text}</pre> : <p>此格式暂不支持预览。</p>}{preview.truncated && <p>仅预览前 128 KB。</p>}
       </aside>}
     </div>
-    {selectionMode && <div className="file-selection"><div className="file-selection-heading"><span>已选 {tab?.selected.length ?? 0} 项</span><button onClick={() => tab && patchTab(tab.id, { selected: listing?.entries.map((e) => e.path) ?? [] })}>全选</button><button onClick={() => { setSelecting(false); if (tab) patchTab(tab.id, { selected: [] }); }}>完成</button></div><div className="file-selection-actions"><button disabled={!tab?.selected.length} onClick={() => { setFiles({ ...getFiles(), clipboard: tab!.selected, clipboardMode: "copy" }); patchTab(tab!.id, { selected: [] }); setSelecting(false); setNotice("已复制，进入目标目录后粘贴"); }}>复制</button><button disabled={!tab?.selected.length || writing} onClick={() => { setFiles({ ...getFiles(), clipboard: tab!.selected, clipboardMode: "move" }); patchTab(tab!.id, { selected: [] }); setSelecting(false); setNotice("已剪切，进入目标目录后移动到此处"); }}>剪切</button><button disabled={!tab?.selected.length} onClick={() => tab && void copyPath(tab.selected)}>复制地址</button><button disabled={tab?.selected.length !== 1 || writing} onClick={() => tab && setDialog({ action: "rename", path: tab.selected[0]!, name: leaf(tab.selected[0]!) })}>重命名</button><button className="file-delete-button" disabled={!tab?.selected.length || writing} onClick={() => { if (tab) { setDeleteMode("permanent"); setDeletePaths([...tab.selected]); } }}>删除</button></div></div>}
+    {onInsert && <div className="file-selection"><span>已选 {tab?.selected.length ?? 0} 项</span><button disabled={!tab?.selected.length} onClick={() => { if (tab) { insertPaths(tab.selected); patchTab(tab.id, { selected: [] }); } }}>插入所选文件</button><button onClick={onClose}>取消</button></div>}
+    {!onInsert && selectionMode && <div className="file-selection"><div className="file-selection-heading"><span>已选 {tab?.selected.length ?? 0} 项</span><button onClick={() => tab && patchTab(tab.id, { selected: listing?.entries.map((e) => e.path) ?? [] })}>全选</button><button onClick={() => { setSelecting(false); if (tab) patchTab(tab.id, { selected: [] }); }}>完成</button></div><div className="file-selection-actions"><button disabled={!tab?.selected.length} onClick={() => tab && insertPaths(tab.selected)}>插入当前会话</button><button disabled={!tab?.selected.length} onClick={() => { setFiles({ ...getFiles(), clipboard: tab!.selected, clipboardMode: "copy" }); patchTab(tab!.id, { selected: [] }); setSelecting(false); setNotice("已复制，进入目标目录后粘贴"); }}>复制</button><button disabled={!tab?.selected.length || writing} onClick={() => { setFiles({ ...getFiles(), clipboard: tab!.selected, clipboardMode: "move" }); patchTab(tab!.id, { selected: [] }); setSelecting(false); setNotice("已剪切，进入目标目录后移动到此处"); }}>剪切</button><button disabled={!tab?.selected.length} onClick={() => tab && void copyPath(tab.selected)}>复制地址</button><button disabled={tab?.selected.length !== 1 || writing} onClick={() => tab && setDialog({ action: "rename", path: tab.selected[0]!, name: leaf(tab.selected[0]!) })}>重命名</button><button className="file-delete-button" disabled={!tab?.selected.length || writing} onClick={() => { if (tab) { setDeleteMode("permanent"); setDeletePaths([...tab.selected]); } }}>删除</button></div></div>}
     {shortcutHelp && <div className="file-shortcuts" role="region" aria-label="文件快捷键"><button onClick={() => { setShortcutHelp(false); browserRef.current?.focus(); }}>关闭</button><p>↑ ↓ / k j：移动 · ← → / h l：返回 / 进入 · Enter：进入或预览</p><p>Space：多选 · v / V：连续选择 / 取消 · Ctrl+A：全选已加载项 · Ctrl+R：反选 · Esc：取消选择</p><p>y：复制 · x：剪切 · p：粘贴 · Y / X：清空剪贴板</p><p>d：移到废纸篓（一次确认） · D：永久删除（两次确认） · r：重命名 · .：隐藏文件 · f：筛选</p><p>快捷键仅在电脑文件区获得焦点时生效。输入框与 Agent 会话不受影响。</p></div>}
     {deletePaths && <DeleteFilesDialog mode={deleteMode} paths={deletePaths} onClose={() => { setDeletePaths(null); if (desktopInput) browserRef.current?.focus(); }} onDeleted={(result) => {
       const current = getFiles();

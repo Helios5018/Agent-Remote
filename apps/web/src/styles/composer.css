@@ -19,7 +19,7 @@
 }
 
 .composer-editor-open .composer-hint,
-.composer-editor-open .key-bar-wrap {
+.composer-editor-open .composer-footer {
   flex: none;
 }
 
@@ -87,7 +87,7 @@
 .composer-input-row {
   display: flex;
   gap: 8px;
-  align-items: flex-end;
+  align-items: stretch;
 }
 
 .composer-editor-open .composer-input-row {
@@ -97,6 +97,10 @@
 }
 
 .composer-input-wrap {
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-input);
   position: relative;
   flex: 1;
   min-width: 0;
@@ -108,41 +112,35 @@
   height: 100%;
 }
 
-.composer-input {
+.composer .composer-input {
   flex: 1;
   min-width: 0;
   width: 100%;
   resize: none;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: #0d1014;
+  border-radius: 12px 12px 0 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
   color: var(--text);
-  padding: 10px 34px 10px 12px;
+  padding: 12px 14px 4px;
   font: inherit;
   /* 16px 以上，iOS 才不会自动放大页面 */
   font-size: 16px;
   line-height: 1.45;
-  min-height: calc(2 * 1.45em + 20px);
+  min-height: calc(2 * 1.45em + 16px);
+  flex: none;
   overflow-y: hidden;
 }
 
-.composer-editor-open .composer-input {
-  height: 100%;
+.composer.composer-editor-open .composer-input {
+  flex: 1;
+  height: auto;
   min-height: 0;
   overflow-y: auto;
 }
 
 .composer-input:disabled {
   opacity: 0.5;
-}
-
-.composer-input-tools {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
 .composer-size-toggle {
@@ -174,30 +172,70 @@
 .composer-actions {
   flex: none;
   display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 8px;
 }
-
-.send-button {
+.composer-action-spacer { flex: 1; }
+.composer .attachment-add {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 24px;
+  font-weight: 400;
+}
+.composer .attachment-add:hover { background: var(--bg-hover); color: var(--text); }
+.composer .composer-size-toggle { width: 34px; height: 34px; }
+.composer .send-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 12px;
   flex: none;
   border: none;
-  border-radius: 10px;
-  padding: 12px 18px;
-  background: var(--accent);
-  color: #08130c;
-  font-weight: 700;
-  font-size: 15px;
+  border-radius: 7px;
+  box-shadow: none;
+  background: var(--primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
-
-.send-button:disabled {
-  opacity: 0.4;
+.composer .send-button:disabled {
+  background: #292e37;
+  color: #747c89;
+  opacity: 1;
+  cursor: default;
+}
+.composer-input-wrap:focus-within { border-color: #6c7e99; }
+.composer-footer { display: flex; align-items: center; gap: 12px; margin-top: 6px; flex: none; min-width: 0; }
+.composer .composer-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: none;
+  width: auto;
+  height: 34px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
 /* 按键条：单行横滑，两端渐隐提示还有更多键 */
 .key-bar-wrap {
   position: relative;
-  margin-top: 8px;
+  flex: 1;
+  min-width: 0;
 }
 
 .key-bar-wrap::before,
@@ -254,31 +292,25 @@
   margin-left: 10px;
 }
 
-.key-button {
+.composer .key-button {
   flex: none;
-  border: 1px solid var(--border);
-  background: #0d1014;
-  color: var(--text);
-  border-radius: 8px;
-  padding: 8px 9px;
-  font-size: 13px;
-  /* 44px 是能稳定点中的最小尺寸，再小就别压了，让它横滑 */
-  min-width: 44px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  box-shadow: none;
+  border-radius: 5px;
+  padding: 0 7px;
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 30px;
+  height: 32px;
   cursor: pointer;
 }
-
-.key-button.danger {
-  border-color: #7f1d1d;
-  color: #fca5a5;
-}
-
-
-.key-button.danger-armed {
-  background: var(--error);
-  color: #200;
-  font-weight: 700;
-}
-
-.key-button:disabled {
-  opacity: 0.4;
+.composer .key-button:not(:disabled):hover { background: var(--bg-hover); border-color: var(--border); color: var(--text); }
+.composer .key-button.danger { color: #cd9099; background: transparent; border-color: transparent; }
+.composer .key-button.danger-armed { background: #542f37; border-color: #a15c65; color: #ffd7db; }
+.composer .key-button:disabled { opacity: .4; }
+@media (pointer: coarse) {
+  .composer .key-button { min-width: 36px; height: 40px; }
+  .composer .composer-collapse { height: 40px; }
 }
