@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentKindSchema, AgentStateSchema, InboxSchema } from "./agent.ts";
+import { AgentKindSchema, AgentStateSchema, AgentStatusSchema, InboxSchema } from "./agent.ts";
 import { CmuxKeySchema, CmuxTreeSchema, ScrollActionSchema, SurfaceSnapshotSchema } from "./cmux.ts";
 import { SurfaceGridSchema } from "./grid.ts";
 
@@ -47,7 +47,7 @@ export type SurfaceOutputResponse = z.infer<typeof SurfaceOutputResponseSchema>;
  */
 export const CreateWorkspaceRequestSchema = z.object({
   cwd: z.string().min(1).max(4096).regex(/^\//).refine(value => !/[\x00-\x1f\x7f]/.test(value)),
-  launch: AgentKindSchema,
+  launch: AgentKindSchema.nullable().default(null),
 });
 export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequestSchema>;
 export type CreateWorkspaceResponse = { ok: true; workspaceId: string; surfaceId: string; launchError?: string };
@@ -171,3 +171,28 @@ export const CloseTopologyRequestSchema = z.object({
   confirm: z.literal(true),
   surfaceIds: z.array(z.string().min(1)).min(1),
 });
+
+/** Authenticated installation identity, persisted with the database. */
+export const ServerInfoResponseSchema = z.object({
+  instanceId: z.string().uuid(), serverVersion: z.string(), agentApiVersion: z.literal(1),
+  demo: z.boolean(), guidePath: z.literal("/agent-guide.md"),
+});
+export type ServerInfoResponse = z.infer<typeof ServerInfoResponseSchema>;
+
+export const SurfaceContextResponseSchema = z.object({
+  instanceId: z.string().uuid(),
+  surface: z.object({
+    id: z.string().uuid(), title: z.string(), type: z.string(), paneId: z.string().nullable(),
+    workspaceId: z.string(), workspaceTitle: z.string(),
+  }),
+  agent: z.object({
+    kind: AgentKindSchema, sessionId: z.string().nullable(), status: AgentStatusSchema.nullable(),
+    currentActivity: z.string().nullable(), hookConnected: z.boolean(), lastActivityAt: z.number().nullable(),
+  }).nullable(),
+  cwd: z.string().nullable(),
+  git: z.object({ root: z.string(), branch: z.string(), hasChanges: z.boolean() }).nullable(),
+  output: z.object({ content: z.string(), fetchedAt: z.number(), limitLines: z.literal(200), limited: z.boolean() }).nullable(),
+  issues: z.array(z.object({ section: z.enum(["cwd", "git", "output"]), code: z.string(), message: z.string() })),
+  fetchedAt: z.number(),
+});
+export type SurfaceContextResponse = z.infer<typeof SurfaceContextResponseSchema>;

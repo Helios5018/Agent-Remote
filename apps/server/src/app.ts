@@ -1,3 +1,5 @@
+import { createInfoRoutes } from "./api/info.ts";
+import { createAgentGuideRoutes } from "./api/agent-guide.ts";
 import { createGitRoutes } from "./api/git.ts";
 import { createFileRoutes } from "./api/files.ts";
 import { Hono } from "hono";
@@ -18,6 +20,8 @@ import { requireAuth, type Env } from "./security/middleware.ts";
 export function createApp(ctx: AppContext) {
   const app = new Hono<Env>();
 
+  app.route("/", createAgentGuideRoutes());
+
   app.get("/api/health", (c) =>
     c.json({ ok: true, version: SERVER_VERSION, demo: ctx.config.demo, now: ctx.now() }),
   );
@@ -31,6 +35,7 @@ export function createApp(ctx: AppContext) {
   // 渲染网格一帧未压缩有 20~80 KB，手机上必须压；其余接口顺带受益。
   api.use("*", compress());
   api.use("*", requireAuth(ctx));
+  api.route("/info", createInfoRoutes(ctx));
   api.route("/files", createFileRoutes(ctx));
   api.route("/git", createGitRoutes());
   api.route("/agents", createAgentRoutes(ctx));

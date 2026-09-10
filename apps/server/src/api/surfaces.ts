@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { ContextTopologyError, readSurfaceContext } from "../services/surface-context.ts";
 import { sleep } from "@car/shared";
 import { scrollOnce, scrollToBottom } from "../services/surface-scroll.ts";
 import { Hono } from "hono";
@@ -96,6 +98,19 @@ export function createSurfaceRoutes(ctx: AppContext) {
     ctx.poller?.scheduleImmediate(created.surfaceId);
 
     return c.json(created, 201);
+  });
+
+  app.get("/:surfaceId/context", async c => {
+    c.header("Cache-Control", "no-store");
+    const id = z.string().uuid().safeParse(c.req.param("surfaceId"));
+    if (!id.success) return c.json(apiError("BAD_REQUEST", "需要 surface UUID"), 400);
+    try {
+      const context = await readSurfaceContext(ctx, id.data);
+      return context ? c.json(context) : c.json(apiError("NOT_FOUND", "surface 不存在"), 404);
+    } catch (error) {
+      if (error instanceof ContextTopologyError) return c.json(apiError("CMUX_UNAVAILABLE", "无法读取 cmux 拓扑"), 503);
+      throw error;
+    }
   });
 
   app.get("/:surfaceId/output", async (c) => {

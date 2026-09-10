@@ -16,6 +16,9 @@ export interface CmuxClient {
   /** 读取某个 surface 的当前输出（纯文本，便宜，用于后台状态推断）。 */
   readSurface(surfaceId: string, options?: ReadSurfaceOptions): Promise<SurfaceSnapshot>;
 
+  /** Read current text without touching SnapshotTracker or Agent state. */
+  readSurfaceText(surfaceId: string, options?: ReadSurfaceOptions): Promise<Omit<SurfaceSnapshot, "revision">>;
+
   /**
    * 读取彩色渲染网格（贵一些，只给正在查看的 surface 用）。
    * 纯文本没有颜色，也没有「每个字符占几格」的信息，无法还原 TUI。

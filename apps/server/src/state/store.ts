@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AgentKind, AgentState, AgentStatus } from "@car/protocol";
 import { createMemoryDatabase, openDatabase, type SqlDatabase } from "./db.ts";
 
@@ -84,8 +85,16 @@ export interface AuditEntry {
 const ACTIVITY_MAX_LEN = 200;
 
 export class StateStore {
+  readonly instanceId: string;
+
   constructor(private readonly db: SqlDatabase) {
     this.db.exec(SCHEMA);
+    const candidate = randomUUID();
+    this.db.run("INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO NOTHING", ["instance_id", candidate]);
+    const stored = this.getSetting("instance_id");
+    // Explicit nonpersistent test driver has no settings; real drivers must persist identity.
+    if (!stored && db.driver !== "memory") throw new Error("无法初始化服务实例 ID");
+    this.instanceId = stored ?? candidate;
   }
 
   static async open(path: string): Promise<StateStore> {

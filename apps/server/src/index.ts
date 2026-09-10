@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   }
   // Hook 密钥与人用的 PIN 完全分开：PIN 短，Hook 密钥长。
   config.hookToken = resolveHookToken(store, { rotate: rotateHookToken });
-  const client: CmuxClient = config.demo ? new FakeCmuxClient() : new CmuxCliClient({ maxOutputLines: config.maxOutputLines });
+  const client: CmuxClient = config.demo ? new FakeCmuxClient(undefined, Date.now, true) : new CmuxCliClient({ maxOutputLines: config.maxOutputLines });
 
   const hub = new RealtimeHub();
   const engine = new StateEngine({
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
       }
 
       // 把真实来源 IP 交给 Hono，限流与「Hook 只收本机」都依赖它。
-      if (url.pathname.startsWith("/api/")) return app.fetch(request, { ip });
+      if (url.pathname === "/agent-guide.md" || url.pathname.startsWith("/api/")) return app.fetch(request, { ip });
 
       if (staticDir) {
         const response = await serveStatic(staticDir, url.pathname);

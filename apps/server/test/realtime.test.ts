@@ -180,6 +180,7 @@ describe("Poller 刷新策略（§18）", () => {
       sendText: (id: string, text: string) => client.sendText(id, text),
       sendKey: (id: string, key: "enter") => client.sendKey(id, key),
       scrollSurface: (id: string, key: "pageup") => client.scrollSurface(id, key),
+      readSurfaceText: (id: string) => client.readSurfaceText(id),
       readHistory: (id: string, lines: number) => client.readHistory(id, lines),
       renameSurface: (id: string, title: string) => client.renameSurface(id, title),
       renameWorkspace: (id: string, title: string) => client.renameWorkspace(id, title),

@@ -66,6 +66,7 @@ bun run build
 | 文档 | 内容 |
 |---|---|
 | [架构与状态流](docs/architecture.md) | 模块边界、数据来源、状态和刷新策略 |
+| [Agent HTTP 接入指南](docs/agent-guide.md) | 外部 Agent 直接使用 HTTP；运行时匿名入口 `/agent-guide.md` |
 | [API 合同](docs/api.md) | HTTP 与 WebSocket |
 | [cmux 集成](docs/cmux-integration.md) | 网格、历史、翻页、启动限制 |
 | [Hook 接入](docs/hooks.md) | 各 Agent 的配置与事件 |

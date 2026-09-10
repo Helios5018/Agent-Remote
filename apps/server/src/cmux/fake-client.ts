@@ -49,7 +49,16 @@ export class FakeCmuxClient implements CmuxClient {
   constructor(
     private workspaces: FakeWorkspaceSpec[] = defaultWorkspaces(),
     private readonly now: () => number = Date.now,
-  ) {}
+    private readonly uuidIds = false,
+  ) {
+    if (uuidIds) for (const workspace of this.workspaces) {
+      workspace.id = crypto.randomUUID();
+      for (const pane of workspace.panes) {
+        pane.id = crypto.randomUUID();
+        for (const surface of pane.surfaces) surface.id = crypto.randomUUID();
+      }
+    }
+  }
 
   async ping(): Promise<boolean> {
     return this.available;
@@ -105,6 +114,12 @@ export class FakeCmuxClient implements CmuxClient {
     return snapshot;
   }
 
+  async readSurfaceText(surfaceId: string, options: ReadSurfaceOptions = {}): Promise<Omit<SurfaceSnapshot, "revision">> {
+    const surface = this.findSurface(surfaceId);
+    if (!surface) throw new Error(`surface not found: ${surfaceId}`);
+    return { surfaceId, content: surface.content.split("\n").slice(-(options.lines ?? 200)).join("\n"), fetchedAt: this.now() };
+  }
+
   /** 把假内容按行摊成网格，每行一段，够测试链路用。 */
   async readGrid(surfaceId: string): Promise<SurfaceGrid> {
     const surface = this.findSurface(surfaceId);
@@ -152,7 +167,7 @@ export class FakeCmuxClient implements CmuxClient {
 
     const seq = (this.nextSurfaceSeq += 1);
     const surface: FakeSurfaceSpec = {
-      id: `sf-new-${seq}`,
+      id: this.uuidIds ? crypto.randomUUID() : `sf-new-${seq}`,
       ref: `surface:${900 + seq}`,
       title: "Terminal",
       agent: null,

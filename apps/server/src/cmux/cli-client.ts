@@ -98,6 +98,13 @@ export class CmuxCliClient implements CmuxClient {
   }
 
   async readSurface(surfaceId: string, options: ReadSurfaceOptions = {}): Promise<SurfaceSnapshot> {
+    const text = await this.readSurfaceText(surfaceId, options);
+    return this.snapshots.update(text.surfaceId, text.content, text.fetchedAt, {
+      surfaceRef: text.surfaceRef, workspaceId: text.workspaceId,
+    }).snapshot;
+  }
+
+  async readSurfaceText(surfaceId: string, options: ReadSurfaceOptions = {}): Promise<Omit<SurfaceSnapshot, "revision">> {
     const args = buildReadScreenArgs(surfaceId, options.lines ?? this.maxOutputLines, options.scrollback ?? false);
     const result = await this.runner(args, { timeoutMs: 8000 });
     if (result.code !== 0) {
@@ -108,11 +115,8 @@ export class CmuxCliClient implements CmuxClient {
       throw new CmuxError(`读取 surface 失败: ${surfaceId}`, "CMUX_COMMAND_FAILED", message);
     }
     const parsed = parseReadScreenJson(parseJson(result.stdout) ?? {});
-    const { snapshot } = this.snapshots.update(parsed.surfaceId ?? surfaceId, parsed.text, this.now(), {
-      surfaceRef: parsed.surfaceRef,
-      workspaceId: parsed.workspaceId,
-    });
-    return snapshot;
+    return { surfaceId: parsed.surfaceId ?? surfaceId, content: parsed.text, fetchedAt: this.now(),
+      surfaceRef: parsed.surfaceRef, workspaceId: parsed.workspaceId };
   }
 
   async readHistory(surfaceId: string, lines: number): Promise<string> {

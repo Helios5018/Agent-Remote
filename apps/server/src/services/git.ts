@@ -42,6 +42,18 @@ export class GitService {
   }
   async requireRoot(path: string) { const root = await this.root(path); if (!root) throw new Error("当前目录不属于 Git 仓库"); return root; }
   private async optional(root: string, args: string[]) { try { return (await runGit(root, args)).trim(); } catch { return ""; } }
+  /** Context only needs local summary; skip ignored files, upstream counts and fetch state. */
+  async summary(path: string): Promise<{ root: string; branch: string; hasChanges: boolean } | null> {
+    const root = await this.root(path);
+    if (!root) return null;
+    const [raw, head] = await Promise.all([
+      runGit(root, ["status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none"]),
+      runGit(root, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(async () =>
+        runGit(root, ["symbolic-ref", "--short", "HEAD"])),
+    ]);
+    return { root, branch: head.trim(), hasChanges: raw.length > 0 };
+  }
+
   async status(path: string): Promise<GitStatus | null> {
     const root = await this.root(path); if (!root) return null;
     const [raw, branch, oid, upstream, gitDir] = await Promise.all([

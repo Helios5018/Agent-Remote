@@ -43,7 +43,7 @@ export function createWorkspaceWriteRoutes(ctx: AppContext) {
 
   app.post("/", async (c) => {
     const parsed = CreateWorkspaceRequestSchema.safeParse(await safeJson(c.req.raw));
-    if (!parsed.success) return c.json(apiError("BAD_REQUEST", "请选择工作目录和 Agent"), 400);
+    if (!parsed.success) return c.json(apiError("BAD_REQUEST", "请选择有效工作目录和 launch 类型"), 400);
     let cwd: string;
     try { cwd = await new FileService().directory(parsed.data.cwd); }
     catch { return c.json(apiError("BAD_REQUEST", "目录不存在或无法访问，请重新选择文件夹"), 400); }
@@ -53,14 +53,19 @@ export function createWorkspaceWriteRoutes(ctx: AppContext) {
       const windowId = (tree.workspaces.find(w => w.selected) ?? tree.workspaces[0])?.windowRef;
       const surface = await ctx.client.createWorkspace(windowId);
       let launchError: string | undefined;
+      let textWritten = false;
       try {
         await sleep(150);
         // 单引号转义目录；只有 cd 成功才执行服务端白名单里的 Agent 命令。
         const quoted = "'" + cwd.replaceAll("'", "'\\''") + "'";
-        await ctx.client.sendText(surface.surfaceId, `cd -- ${quoted} && ${ctx.config.launchCommands[parsed.data.launch]}`);
+        const command = `cd -- ${quoted}` + (parsed.data.launch ? ` && ${ctx.config.launchCommands[parsed.data.launch]}` : "");
+        await ctx.client.sendText(surface.surfaceId, command);
+        textWritten = true;
         await ctx.client.sendKey(surface.surfaceId, "enter");
       } catch {
-        launchError = "Workspace 已创建，Agent 启动结果未确认。请打开会话检查，不要重复创建。";
+        launchError = textWritten
+          ? "Workspace 已创建，初始化命令已写入，但回车结果未知。请检查画面；若命令仍在输入行，仅补 Enter，不要重发正文，也不要重复创建。"
+          : "Workspace 已创建，初始化命令写入结果未知。请打开会话检查，不要重发正文，也不要重复创建。";
       }
       try { await created(surface, "workspace.create"); }
       catch { launchError ??= "Workspace 已创建，列表刷新失败。请打开会话检查。"; }
