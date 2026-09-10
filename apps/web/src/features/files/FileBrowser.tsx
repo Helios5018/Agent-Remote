@@ -1,3 +1,6 @@
+import { GitContext, useGitStatus } from "./git-state.ts";
+import { GitSummary } from "./GitSummary.tsx";
+import { GitPanel, type GitTab } from "./GitPanel.tsx";
 import { FileEntryContent, formatFileSize as size } from "./FileEntryContent.tsx";
 import { useDesktopInput } from "../../hooks/useDesktopInput.ts";
 import { useElementWidth } from "../../hooks/useElementWidth.ts";
@@ -27,6 +30,11 @@ export function FileBrowser({ scopeId, onClose, workDirectory, onInsert }: { sco
   const [error, setError] = useState(""); const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false); const [writing, setWriting] = useState(false);
   const [revision, setRevision] = useState(0); const [menu, setMenu] = useState(false);
+  const git = useGitStatus(tab?.path, revision);
+  const [gitOpen, setGitOpen] = useState(false);
+  const [gitTab, setGitTab] = useState<GitTab>("overview");
+  const openGit = (next: GitTab) => { setGitTab(next); setGitOpen(true); };
+  useEffect(() => { setGitOpen(false); }, [git.repo?.root]);
   const [home, setHome] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [selecting, setSelecting] = useState(false);
@@ -203,7 +211,7 @@ export function FileBrowser({ scopeId, onClose, workDirectory, onInsert }: { sco
     else if (key === "f") setSearchOpen(true);
     else setShortcutHelp(true);
   };
-  return <section ref={browserRef} tabIndex={0} onKeyDown={onShortcut} className={`file-browser${threeColumns ? " three-columns" : " one-column"}`} aria-label="文件系统">
+  return <GitContext.Provider value={git.error ? null : git.repo}><section ref={browserRef} tabIndex={0} onKeyDown={gitOpen ? undefined : onShortcut} className={`file-browser${threeColumns ? " three-columns" : " one-column"}`} aria-label="文件系统">
     {state.tabs.length > 1 && <div className="file-tabs file-directory-tabs" role="tablist" aria-label="目录标签">{state.tabs.map((t) => <button role="tab" aria-selected={t.id === state.active} key={t.id} onClick={() => setFiles({ ...getFiles(), active: t.id })}>{leaf(t.path)}</button>)}</div>}
     <div className="file-toolbar">
       <button disabled={!listing?.parent} aria-label="返回上级目录" onClick={() => listing?.parent && navigate(listing.parent)}>↑</button>
@@ -226,12 +234,14 @@ export function FileBrowser({ scopeId, onClose, workDirectory, onInsert }: { sco
         <button className="file-menu-close file-menu-divider" onClick={onClose}>关闭文件系统</button>
       </div>}</div>
     </div>
-    {(searchOpen || !!tab?.query) && <div className="file-search"><select aria-label="搜索范围" value={tab?.mode ?? "filter"} onChange={(e) => tab && patchTab(tab.id, { mode: e.target.value, loaded: 100, scroll: 0 })}><option value="filter">当前目录</option><option value="name">递归找文件</option><option value="content">搜索内容</option></select>
+    {git.error ? <div className="git-summary git-summary-error" role="status">Git 状态读取失败：{git.error}</div> : git.repo ? <GitSummary repo={git.repo} open={gitOpen} compact={browserWidth < 650} onOpen={openGit} onToggle={() => gitOpen ? setGitOpen(false) : openGit("overview")} /> : git.loading && <div className="git-summary git-muted">正在读取 Git 状态…</div>}
+    {gitOpen && git.repo && <GitPanel key={git.repo.root} repo={git.repo} tab={gitTab} onTabChange={setGitTab} onFetch={() => void git.fetchNow()} />}
+    {!gitOpen && (searchOpen || !!tab?.query) && <div className="file-search"><select aria-label="搜索范围" value={tab?.mode ?? "filter"} onChange={(e) => tab && patchTab(tab.id, { mode: e.target.value, loaded: 100, scroll: 0 })}><option value="filter">当前目录</option><option value="name">递归找文件</option><option value="content">搜索内容</option></select>
       <input autoFocus aria-label="搜索文件" placeholder="搜索…" value={tab?.query ?? ""} onChange={(e) => tab && patchTab(tab.id, { query: e.target.value, selected: [], loaded: 100, scroll: 0 })} />
       <button onClick={() => { requestRef.current?.abort(); setBusy(false); setSearchOpen(false); if (tab) patchTab(tab.id, { query: "", scroll: 0, loaded: 100 }); }}>取消</button>
     </div>}
     {error && <div className="file-message error" role="alert">{error}</div>}{notice && <div className="file-toast" role="status">{notice}</div>}
-    <div className={`file-body${preview ? " has-preview" : ""}`}>
+    <div style={gitOpen ? { display: "none" } : undefined} className={`file-body${preview ? " has-preview" : ""}`}>
       {threeColumns && <ParentDirectory path={tab?.path && tab.path !== "/" ? tab.path.slice(0, tab.path.lastIndexOf("/")) || "/" : null} current={tab?.path ?? ""} hidden={tab?.hidden ?? true} onPromote={() => tab && navigate(parentPath(tab.path))} onNavigate={() => tab && navigate(parentPath(tab.path))} onOpen={(entry) => { if (tab) { navigate(parentPath(tab.path)); setFocusedPath(entry.path); } }} />}
       <div className="file-list" ref={listRef} onScroll={(e) => { if (tab) patchTab(tab.id, { scroll: e.currentTarget.scrollTop }); }}
         onTouchStart={(e) => { const p = e.touches[0]; if (p) touch.current = { x: p.clientX, y: p.clientY }; }}
@@ -280,5 +290,5 @@ export function FileBrowser({ scopeId, onClose, workDirectory, onInsert }: { sco
       setError(result.failed?.map((f) => `${leaf(f.path)}：${f.message}`).join("；") ?? "");
     }} />}
     <dialog ref={dialogRef} className="rename-dialog" aria-label="文件操作" onCancel={() => setDialog(null)} onClose={() => { setDialog(null); if (desktopInput) browserRef.current?.focus(); }}>{dialog && <form onSubmit={(e) => { e.preventDefault(); if (!tab) return; void operate(dialog.action === "rename" ? { action: "rename", path: dialog.path!, name: dialog.name } : { action: "create", directory: tab.path, name: dialog.name, kind: dialog.action }); }}><h2>{dialog.action === "rename" ? "重命名" : dialog.action === "file" ? "新建文件" : "新建文件夹"}</h2><label>名称<input autoFocus value={dialog.name} maxLength={255} onChange={(e) => setDialog({ ...dialog, name: e.target.value })} /></label>{error && <p role="alert">{error}</p>}<div className="rename-dialog-actions"><button type="button" disabled={writing} onClick={() => dialogRef.current?.close()}>取消</button><button type="submit" disabled={writing || !dialog.name.trim()}>{writing ? "处理中…" : "保存"}</button></div></form>}</dialog>
-  </section>;
+  </section></GitContext.Provider>;
 }

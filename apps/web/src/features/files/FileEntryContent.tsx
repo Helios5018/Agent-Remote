@@ -1,3 +1,5 @@
+import { usePathMark } from "./git-state.ts";
+import { GitMark } from "./GitMark.tsx";
 import type { FileEntry } from "@car/protocol";
 
 type FileStyle = "folder" | "code" | "config" | "image" | "video" | "audio" | "archive" | "pdf" | "document" | "sheet" | "link" | "file";
@@ -38,5 +40,6 @@ export function FileIcon({ style }: { style: FileStyle }) {
 }
 export function formatFileSize(n: number) { return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`; }
 export function FileEntryContent({ entry, detail }: { entry: FileEntry; detail?: string }) {
-  return <><FileIcon style={fileStyle(entry)} /><span className="file-name">{entry.name}{detail && <small>{detail}</small>}</span>{entry.kind === "file" && <span className="file-entry-meta">{formatFileSize(entry.size)}</span>}</>;
+  const mark = usePathMark(entry.path);
+  return <><FileIcon style={fileStyle(entry)} /><span className="file-name">{entry.name}{detail && <small>{detail}</small>}</span>{entry.kind === "file" && <span className="file-entry-meta">{formatFileSize(entry.size)}</span>}<GitMark mark={mark} /></>;
 }

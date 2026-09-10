@@ -1,3 +1,4 @@
+import { createGitRoutes } from "./api/git.ts";
 import { createFileRoutes } from "./api/files.ts";
 import { Hono } from "hono";
 import { compress } from "hono/compress";
@@ -31,6 +32,7 @@ export function createApp(ctx: AppContext) {
   api.use("*", compress());
   api.use("*", requireAuth(ctx));
   api.route("/files", createFileRoutes(ctx));
+  api.route("/git", createGitRoutes());
   api.route("/agents", createAgentRoutes(ctx));
   api.route("/tree", createWorkspaceRoutes(ctx));
   api.route("/workspaces", createWorkspaceWriteRoutes(ctx));
