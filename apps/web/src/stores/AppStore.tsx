@@ -13,6 +13,8 @@ import {
 } from "react";
 import type {
   AgentKind,
+  CreateWorkspaceRequest,
+  CreateWorkspaceResponse,
   AgentState,
   CmuxKey,
   CreateSurfaceResponse,
@@ -62,7 +64,7 @@ interface AppStoreValue {
   renameSurface(surfaceId: string, title: string): Promise<void>;
   closeWorkspace(workspaceId: string, surfaceIds: string[]): Promise<void>;
   closePane(workspaceId: string, paneId: string, surfaceIds: string[]): Promise<void>;
-  createWorkspace(): Promise<string>;
+  createWorkspace(input: CreateWorkspaceRequest): Promise<CreateWorkspaceResponse>;
   createPane(workspaceId: string): Promise<string>;
   renameWorkspace(workspaceId: string, title: string): Promise<void>;
   /** 关掉 cmux 里的真实 tab；失败会抛出。 */
@@ -319,10 +321,10 @@ export function AppStoreProvider({ children }: { children: ReactNode }) {
         finally { await Promise.all([refreshTree(), refreshInbox()]); }
       }),
 
-      createWorkspace: () => write(async () => {
-        const result = await api.createWorkspace();
-        await Promise.all([refreshTree(), refreshInbox()]);
-        return result.workspaceId;
+      createWorkspace: (input) => write(async () => {
+        const result = await api.createWorkspace(input);
+        await Promise.allSettled([refreshTree(), refreshInbox()]);
+        return result;
       }),
 
       createPane: (workspaceId: string) => write(async () => {

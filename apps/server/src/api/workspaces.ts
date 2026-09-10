@@ -1,5 +1,7 @@
+import { FileService } from "../services/files.ts";
+import { sleep } from "@car/shared";
 import { Hono } from "hono";
-import { CloseTopologyRequestSchema, RenameTitleRequestSchema } from "@car/protocol";
+import { CreateWorkspaceRequestSchema, CloseTopologyRequestSchema, RenameTitleRequestSchema } from "@car/protocol";
 import { apiError, type AppContext } from "../context.ts";
 import { CmuxError } from "../cmux/client.ts";
 import { type Env } from "../security/middleware.ts";
@@ -40,10 +42,29 @@ export function createWorkspaceWriteRoutes(ctx: AppContext) {
   }
 
   app.post("/", async (c) => {
+    const parsed = CreateWorkspaceRequestSchema.safeParse(await safeJson(c.req.raw));
+    if (!parsed.success) return c.json(apiError("BAD_REQUEST", "请选择工作目录和 Agent"), 400);
+    let cwd: string;
+    try { cwd = await new FileService().directory(parsed.data.cwd); }
+    catch { return c.json(apiError("BAD_REQUEST", "目录不存在或无法访问，请重新选择文件夹"), 400); }
+    if (/[\x00-\x1f\x7f]/.test(cwd)) return c.json(apiError("BAD_REQUEST", "目录不能包含控制字符"), 400);
     try {
       const tree = await ctx.client.getTree();
       const windowId = (tree.workspaces.find(w => w.selected) ?? tree.workspaces[0])?.windowRef;
-      return c.json(await created(await ctx.client.createWorkspace(windowId), "workspace.create"), 201);
+      const surface = await ctx.client.createWorkspace(windowId);
+      let launchError: string | undefined;
+      try {
+        await sleep(150);
+        // 单引号转义目录；只有 cd 成功才执行服务端白名单里的 Agent 命令。
+        const quoted = "'" + cwd.replaceAll("'", "'\\''") + "'";
+        await ctx.client.sendText(surface.surfaceId, `cd -- ${quoted} && ${ctx.config.launchCommands[parsed.data.launch]}`);
+        await ctx.client.sendKey(surface.surfaceId, "enter");
+      } catch {
+        launchError = "Workspace 已创建，Agent 启动结果未确认。请打开会话检查，不要重复创建。";
+      }
+      try { await created(surface, "workspace.create"); }
+      catch { launchError ??= "Workspace 已创建，列表刷新失败。请打开会话检查。"; }
+      return c.json({ ok: true as const, ...surface, ...(launchError ? { launchError } : {}) }, 201);
     } catch (error) {
       return c.json(apiError("CMUX_UNAVAILABLE", error instanceof Error ? error.message : "增加 workspace 失败"), 503);
     }

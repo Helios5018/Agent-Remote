@@ -45,6 +45,13 @@ export type SurfaceOutputResponse = z.infer<typeof SurfaceOutputResponseSchema>;
  * `launch` 是白名单枚举而不是自由命令字符串 —— 这个接口开在公网上，
  * 收任意命令等于送一个远程 shell。
  */
+export const CreateWorkspaceRequestSchema = z.object({
+  cwd: z.string().min(1).max(4096).regex(/^\//).refine(value => !/[\x00-\x1f\x7f]/.test(value)),
+  launch: AgentKindSchema,
+});
+export type CreateWorkspaceRequest = z.infer<typeof CreateWorkspaceRequestSchema>;
+export type CreateWorkspaceResponse = { ok: true; workspaceId: string; surfaceId: string; launchError?: string };
+
 export const CreateSurfaceRequestSchema = z.object({
   /** 目标 pane（UUID 优先，也认 pane:N 短引用）。必填：不存在「当前 pane」这种概念。 */
   paneId: z.string().min(1).max(128),

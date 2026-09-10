@@ -1,3 +1,6 @@
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type {
   AgentDetailResponse,
@@ -845,11 +848,49 @@ describe("创建 workspace 和 pane", () => {
     }
   });
 
+  it("拒绝无效目录和未授权的 Agent，不创建 workspace", async () => {
+    const h = await createHarness();
+    const cookie = await h.loginCookie();
+    const before = await h.client.getTree();
+    for (const body of [{}, { cwd: "/", launch: "sh" }, { cwd: "relative", launch: "codex" },
+      { cwd: "/not-a-real-workspace-directory", launch: "codex" }, { cwd: import.meta.filename, launch: "codex" },
+      { cwd: "/tmp/\ncommand", launch: "codex" }]) {
+      expect((await h.request("/api/workspaces", { method: "POST", cookie, body: JSON.stringify(body) })).status).toBe(400);
+    }
+    expect(await h.client.getTree()).toEqual(before);
+  });
+
+  it("安全引用目录，并且只向新终端发送启动命令", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "workspace ' $(echo ignored) "));
+    try {
+      const h = await createHarness();
+      const cookie = await h.loginCookie();
+      const response = await h.request("/api/workspaces", { method: "POST", cookie,
+        body: JSON.stringify({ cwd: directory, launch: "codex" }) });
+      expect(response.status).toBe(201);
+      const result = await response.json() as { surfaceId: string };
+      const cwd = await realpath(directory);
+      expect(h.client.sentText).toEqual([{ surfaceId: result.surfaceId,
+        text: "cd -- '" + cwd.replaceAll("'", "'\\''") + "' && codex-d" }]);
+      expect(h.client.sentKeys.at(-1)).toEqual({ surfaceId: result.surfaceId, key: "enter" });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it("启动发送失败仍返回已创建的 workspace，避免重复创建", async () => {
+    const h = await createHarness();
+    const cookie = await h.loginCookie();
+    h.client.sendText = async () => { throw new Error("delivery unknown"); };
+    const response = await h.request("/api/workspaces", { method: "POST", cookie,
+      body: JSON.stringify({ cwd: process.cwd(), launch: "claude" }) });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ ok: true, surfaceId: expect.any(String), launchError: expect.stringContaining("不要重复创建") });
+  });
+
   it("创建 workspace 带一个终端，新增 pane 只影响指定 workspace", async () => {
     const h = await createHarness();
     const cookie = await h.loginCookie();
     const before = await h.client.getTree();
-    const response = await h.request("/api/workspaces", { method: "POST", cookie });
+    const response = await h.request("/api/workspaces", { method: "POST", cookie, body: JSON.stringify({ cwd: process.cwd(), launch: "codex" }) });
     expect(response.status).toBe(201);
     const created = await response.json() as { workspaceId: string; surfaceId: string };
     const tree = await h.client.getTree();

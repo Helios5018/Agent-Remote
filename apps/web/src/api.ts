@@ -2,6 +2,8 @@ import { SurfaceWriteResponseSchema, CreateSurfaceResponseSchema } from "@car/pr
 import type {
   AgentDetailResponse,
   AgentKind,
+  CreateWorkspaceRequest,
+  CreateWorkspaceResponse,
   CmuxKey,
   CreateSurfaceResponse,
   Inbox,
@@ -122,7 +124,7 @@ export const api = {
       method: "POST", body: JSON.stringify({ confirm: true, surfaceIds }),
     }),
 
-  createWorkspace: () => request<{ ok: true; workspaceId: string }>("/api/workspaces", { method: "POST" }),
+  createWorkspace: (input: CreateWorkspaceRequest) => request<CreateWorkspaceResponse>("/api/workspaces", { method: "POST", body: JSON.stringify(input) }),
 
   createPane: (workspaceId: string) =>
     request<{ ok: true; workspaceId: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/panes`, { method: "POST" }),

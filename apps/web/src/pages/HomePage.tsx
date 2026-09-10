@@ -1,3 +1,4 @@
+import { CreateWorkspaceDialog } from "../features/workspace/CreateWorkspaceDialog.tsx";
 import { useEffect, useMemo, useState } from "react";
 import type { AttentionGroup, CmuxSurface } from "@car/protocol";
 import { attentionGroupOf } from "@car/protocol";
@@ -55,11 +56,12 @@ export function HomePage({
   /** 只看某一个 workspace（来自 #/w/:id 深链）。 */
   workspaceId?: string;
 }) {
-  const { inbox, tree, error, refreshInbox, refreshTree, subscribe, connection, renameWorkspace, createWorkspace, createPane } =
+  const { inbox, tree, error, refreshInbox, refreshTree, subscribe, connection, renameWorkspace, createPane } =
     useAppStore();
   const { homeTitle, setAppName } = useAppName();
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs);
   const [closeTarget, setCloseTarget] = useState<WorkspaceCloseTarget | null>(null);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [query, setQuery] = useState("");
   const [now, setNow] = useState(() => Date.now());
 
@@ -183,12 +185,14 @@ export function HomePage({
     <div className="page">
       {closeTarget ? <WorkspaceCloseDialog target={closeTarget} onDismiss={() => setCloseTarget(null)}
         onWorkspaceClosed={id => { if (workspaceId === id) navigate({ name: "inbox" }); }} /> : null}
+      {creatingWorkspace && <CreateWorkspaceDialog onDismiss={() => setCreatingWorkspace(false)}
+        onCreated={id => { void revealCreated(async () => id); }} navigate={navigate} />}
       <TopBar
         closeActions={focusedWorkspace ? {
           workspace: () => setCloseTarget({ workspace: focusedWorkspace, mode: "workspace" }),
           pane: () => setCloseTarget({ workspace: focusedWorkspace, mode: "pane" }),
         } : undefined}
-        onCreate={() => revealCreated(focusedWorkspace ? () => createPane(focusedWorkspace.id) : createWorkspace)}
+        onCreate={async () => { if (focusedWorkspace) await revealCreated(() => createPane(focusedWorkspace.id)); else setCreatingWorkspace(true); }}
         createLabel={focusedWorkspace ? "增加 pane" : "增加 workspace"}
         title={title}
         subtitle={summaryText}
