@@ -100,6 +100,7 @@ export const InlineEditor = forwardRef<InlineEditorHandle, {
     if (history.current.length > 100) history.current.shift();
     future.current = [];
     if (native) painted.current = next;
+    if (root.current) root.current.dataset.empty = String(next.length === 0);
     current.current = next;
     onChange(next);
   };
@@ -136,8 +137,15 @@ export const InlineEditor = forwardRef<InlineEditorHandle, {
 
   return <div ref={root} className="composer-input inline-editor" role="textbox" aria-label="输入消息" aria-multiline="true" aria-disabled={disabled}
     contentEditable={!disabled} suppressContentEditableWarning data-placeholder="输入消息……" tabIndex={0}
-    onInput={() => { if (!root.current || composing.current) return; const next = read(root.current); commit(next, true); remember(); root.current.dataset.empty = String(next.length === 0); }}
-    onCompositionStart={() => { composing.current = true; }}
+    onInput={() => {
+      if (!root.current) return;
+      const next = read(root.current);
+      // IME mutates the DOM before committing the draft; hide the placeholder immediately.
+      root.current.dataset.empty = String(next.length === 0);
+      if (composing.current) return;
+      commit(next, true); remember();
+    }}
+    onCompositionStart={() => { composing.current = true; if (root.current) root.current.dataset.empty = "false"; }}
     onCompositionEnd={() => { composing.current = false; if (root.current) { commit(read(root.current), true); remember(); } }}
     onBlur={remember} onKeyUp={remember} onMouseUp={remember} onTouchEnd={remember}
     onClick={event => { const chip = (event.target as HTMLElement).closest<HTMLElement>("[data-file-ref]"); const ref = current.current.find(n => n.type === "file" && n.id === chip?.dataset.fileRef); if (ref?.type === "file") onReference(ref); }}
