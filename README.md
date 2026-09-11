@@ -31,6 +31,37 @@ bun run install-hooks
 
 已有服务优先复用端口和 tmux session。公网更新见 [公网暴露指南](docs/公网暴露指南.md)，不要为了更新代码重建隧道。
 
+## 外部 Agent 如何接入
+
+能发送 HTTP 请求的 Agent 可以直接使用这个服务，无需安装 Skill、MCP 或 SDK。先确认服务已运行包含 HTTP 接入功能的版本；已有公网服务需按 [公网暴露指南](docs/公网暴露指南.md) 原地更新。
+
+给 Agent 提供三样信息：**服务根地址、Access PIN、本次任务和授权范围**。同一台 Mac 上可以使用 `http://127.0.0.1:4318`；其他机器上的 Agent 使用它能访问的局域网或公网地址，不能使用你这台 Mac 的 localhost。根地址不包含网页的 `#/` 或 `#/s/...`。
+
+可以把下面这段发给 Agent，替换占位内容；PIN 通过私密会话或凭证工具单独提供，不写进项目文件：
+
+```text
+请通过 Agent Remote 操作我的 Mac。
+服务根地址：<baseUrl>
+先读取使用指南：<baseUrl>/agent-guide.md
+Access PIN：通过本次私密会话或指定凭证来源获取
+任务及授权范围：<具体项目目录、目标会话，以及允许执行的操作>
+
+按指南登录并复用 Cookie，读取实例信息和会话结构，再读取目标会话的 context。
+核对实例、surface UUID、程序和目录后执行任务，通过输出和产物验证结果。
+如果输入或创建请求超时，先观察现场，不自动重发正文或重复创建。
+```
+
+指南公开可读，业务接口需要登录。最短调用顺序：
+
+1. `POST /api/auth/login`，正文 `{ "token": "<Access PIN>" }`，保存并复用返回的 Session Cookie。
+2. `GET /api/info` 核验实例身份，`GET /api/tree` 找到目标 surface UUID。
+3. `GET /api/surfaces/<UUID>/context` 查看程序、状态、工作目录、Git 摘要及最近输出。
+4. 核对目标后，`POST /api/surfaces/<UUID>/input` 发送 `{ "text": "任务正文", "submit": true }`，再观察结果。普通 Shell 会把文本当命令，务必确认前台程序。
+
+需要专用 Shell 时，调用 `POST /api/workspaces`，正文 `{ "cwd": "/已存在的项目绝对目录", "launch": null }`，再使用返回的 surfaceId。创建成功不代表目录初始化或程序已就绪，先读取 context 核对。
+
+完整 Python 示例、上传下载、文件和 Git 接口、地址/PIN 变化后的恢复方式见 [Agent HTTP 接入指南](docs/agent-guide.md)。运行时同一份指南位于 `<baseUrl>/agent-guide.md`；URL 变化后换用新地址登录，并通过 `/api/info` 的 instanceId 核验是否仍为同一实例。
+
 ## 页面
 
 | 地址 | 用途 |
