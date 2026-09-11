@@ -2,13 +2,13 @@
 name: launch-public
 description: >
   一键启动本仓库的 CMUX Agent Remote，用 Sealtun 把 127.0.0.1:4318 开到公网，
-  并把公网地址与 Access PIN 发到 Link 的飞书（link@vivix.ai）。
+  并把公网地址、Access PIN 和可整段粘贴的 Agent HTTP 控制说明发到 Link 的飞书（link@vivix.ai）。
   当用户说「拉起 agent remote」「开到公网」「挂公网」「launch-public」
   「暴露 agent remote」「sealtun 公网」「公网原地刷新」「更新线上服务」
   或运行 /launch-public 时使用。
   关掉时用户会说「关掉公网」「停掉 agent remote」。
 metadata:
-  short-description: 启动 Agent Remote 并 Sealtun 公网暴露，飞书通知 Link
+  short-description: 启动 Agent Remote 并公网暴露，飞书发送可粘贴的 Agent 控制说明
 ---
 
 # 一键公网拉起 Agent Remote
@@ -40,7 +40,7 @@ default_interface="$(route -n get default 2>/dev/null | awk '/interface:/{print 
 lan_ip="$(ipconfig getifaddr "$default_interface" 2>/dev/null || echo 未连接)"
 ```
 
-4. 把 `url`、`pin` 和设备信息发给 Link。先解析收件人，再发：
+4. 把可整段粘贴的控制说明发给 Link。先解析收件人，再按模板填入后发送。飞书正文唯一源是 `templates/feishu-notice.md`，不要自己改写成短通知。
 
 ```bash
 lark-cli contact +search-user --query "link@vivix.ai" --as user --format json
@@ -49,11 +49,16 @@ lark-cli contact +search-user --query "link@vivix.ai" --as user --format json
 用返回的 `open_id`。搜不到再用 `ou_51401736edf0bf24ea96d0edebe3f28d`。然后：
 
 ```bash
-notice="$(printf '## Agent Remote 已上公网\n\n- 地址：%s\n- Access PIN：%s\n\n### 运行设备\n\n- 设备名称：%s\n- 设备型号：%s\n- 系统版本：%s\n- CPU 架构：%s\n- 局域网 IP：%s\n\n本机 http://127.0.0.1:4318 · tmux `agent-remote-web`' "$url" "$pin" "$device_name" "$device_model" "$os_version" "$cpu_arch" "$lan_ip")"
+template=".agents/skills/launch-public/templates/feishu-notice.md"
+title="Agent Remote 已上公网"
+notice="$(sed -e "s|__TITLE__|$title|g" -e "s|__URL__|$url|g" -e "s|__PIN__|$pin|g" \
+  -e "s|__DEVICE_NAME__|$device_name|g" -e "s|__DEVICE_MODEL__|$device_model|g" \
+  -e "s|__OS_VERSION__|$os_version|g" -e "s|__CPU_ARCH__|$cpu_arch|g" \
+  -e "s|__LAN_IP__|$lan_ip|g" "$template")"
 lark-cli im +messages-send --as user --user-id <open_id> --markdown "$notice"
 ```
 
-飞书失败仍要把 `url` / `pin` 当面告诉用户。
+飞书失败仍要把 `url` / `pin` 和指南地址当面告诉用户。
 
 5. 回复用户时写清：tmux session 名、启动命令、端口、看日志、怎么停。PIN 已经在飞书里就不要再贴一遍，除非飞书没发出去。
 
@@ -69,7 +74,7 @@ bash .agents/skills/launch-public/scripts/launch-public.sh refresh
 
 如果 `4318` 正在监听但不属于 `agent-remote-web`，脚本会停止并报错，禁止为追求原地更新而误杀未知进程。刷新后必须验证本地与公网 HTTP 状态；前端有改动时还要确认公网 HTML 引用的资源哈希与 `apps/web/dist/index.html` 一致。
 
-刷新成功后，按上面的飞书流程重新采集并发送当前 URL、PIN 与设备信息，消息标题改为“Agent Remote 已原地刷新”。
+刷新成功后，按上面的飞书流程重新采集并发送；`title` 改为 `Agent Remote 已原地刷新`，其余仍用同一模板。
 
 ## 关掉
 
